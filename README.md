@@ -1,6 +1,6 @@
 # WSB ETF
 
-A synthetic “ETF” derived from [r/wallstreetbets](https://www.reddit.com/r/wallstreetbets/) discussion: Reddit posts are scraped, sentiment is labeled with **Google Gemini**, weights and a daily NAV-style price are computed (using **Yahoo Finance** via `yfinance`), and results are stored in **PostgreSQL**. A small **Express** API exposes that data to a **Vite + React** dashboard with charting (**TradingView Lightweight Charts**).
+A synthetic “ETF” derived from [r/wallstreetbets](https://www.reddit.com/r/wallstreetbets/) discussion: Reddit posts are pulled via the **Arctic Shift** API; **Gemini 2.0 Flash** returns a **JSON array** constrained by an explicit **response schema** (`application/json`); results are merged per ticker with **Reddit score–weighted** sentiment votes, then weights and a daily NAV-style price are computed (using **Yahoo Finance** via `yfinance`), and results are stored in **PostgreSQL**. A small **Express** API exposes that data to a **Vite + React** dashboard with charting (**TradingView Lightweight Charts**).
 
 This repo is set up so each piece can run in **Docker** and deploy cleanly on **[Railway](https://railway.app/)** as separate services that share one database.
 
@@ -34,36 +34,103 @@ flowchart LR
 
 | Component | Role |
 |-----------|------|
-| **wsb-etf-sentinel** (`wsb-etf-sentinel/`) | Scheduled job: fetch top posts from WSB (via Arctic Shift), analyze tickers with Gemini, compute portfolio weights and a weighted ETF price, diff vs yesterday, **write** to Postgres. |
+| **wsb-etf-sentinel** (`wsb-etf-sentinel/`) | Batch pipeline: pull r/wallstreetbets from [Arctic Shift](https://github.com/ArthurHeitmann/arctic_shift/blob/master/api/README.md) over a configurable time window (default **7 calendar days** ending on the ETF date), **drop** posts with no usable selftext (`[removed]` / `[deleted]` / empty), keep posts with **archived `score` ≥ 10** (`min_score` in `scraper.py`), **re-rank by `score`** and take the top *N*. **One Gemini call per post** with **structured JSON** output (`RESPONSE_SCHEMA` in `analyzer.py`); signals are **merged per ticker** using **score-weighted** sentiment votes, then composition / ETF price / changelog **write** to Postgres. Optional **Flask** sync server (`python -m src.sync_server` when `SYNC_HTTP_PORT` is set) exposes `POST /sync` for on-demand runs. |
 | **wsb-etf-db** (PostgreSQL) | Single source of truth: composition, daily price points, and changelog rows. Created/updated by the sentinel; **read** by the API. |
 | **wsb-etf-api** (`wsb-etf-api/`) | Express app on `PORT` (default 3000): JSON endpoints under `/api/*`, CORS enabled for browser calls from the dashboard origin. |
 | **wsb-etf-dashboard** (`wsb-etf-dashboard/`) | Static SPA built with Vite, served by nginx. At build time, `VITE_API_URL` is baked in so the browser calls your deployed API directly (not through nginx). |
 
 **Data flow (daily):**
 
-1. **Scrape** — Top posts from r/wallstreetbets; tickers extracted from titles/bodies (Arctic Shift).
-2. **Analyze** — Gemini returns per-ticker sentiment (`bullish` / `bearish` / `neutral`).
+1. **Fetch** — Arctic Shift returns r/wallstreetbets posts (paginated, `sort` = `created_utc`). The pipeline dedupes pages, **discards** rows with no real selftext (**empty**, **`[removed]`**, or **`[deleted]`**), keeps only posts with **`score` ≥ 10**, scans up to **`max_posts_scan`** (default **15000**, but see **pagination cap** below), **sorts by `score`**, and keeps the top **`limit`** (default **200**) for Gemini.
+2. **Analyze** — For **each** retained post, **`gemini-2.0-flash`** runs with **`response_mime_type: application/json`** and a **JSON Schema** that requires a top-level **array** of objects: **`ticker`** (string) and **`sentiment`** (`bullish` \| `bearish` \| `neutral`). The model sees **title + up to 2000 characters** of body (see `PROMPT_TEMPLATE` in `analyzer.py`). **`generate_content` → `json.loads(response.text)`** yields that array (empty if no tickers). Per-post signals are then **aggregated per ticker**: for each `(ticker, sentiment)` vote, the **post’s Reddit `score`** is added to that sentiment’s running total; the winning label is whichever **`bullish` / `bearish` / `neutral`** has the **largest summed score** (see `_merge_sentiments`).
 3. **Compose** — Bullish-heavy names get higher weight; weights normalize to 100% of the synthetic basket.
 4. **Price** — `yfinance` pulls current (or latest) prices; a weighted sum becomes the day’s ETF price.
-5. **Changelog** — Compare today’s basket to yesterday’s → `added`, `removed`, `rebalanced`.
+5. **Changelog** — The new basket is diffed against a baseline composition (by default **one week before** the ETF date) → `added`, `removed`, `rebalanced`.
 6. **Persist** — All of the above is upserted into Postgres.
 7. **Serve** — The API reads those tables; the UI fetches JSON and renders tables + price chart.
 
-**Presync / custom window:** Arctic Shift returns posts ordered by time, not by score. The pipeline paginates (up to `max_posts_scan`, default 800), keeps posts that mention tickers, then **sorts by Reddit score** and analyzes the top `limit` (default 50). Use a time window so “last year” is meaningful, for example:
+**Scores:** Arctic Shift’s [API notes](https://github.com/ArthurHeitmann/arctic_shift/blob/master/api/README.md) state that until **`score` / `num_comments` are refreshed (~36 hours)** they may be **1 or 0** right after first archive—so “top by score” follows the **archive**, not always live Reddit. The scraper’s **`min_score` = 10** filters out most of those placeholder rows, but very new high‑engagement threads can still be missing from the ranking until the archive updates. Optional field **`retrieved_on`** is available from their API if you extend `fields` in `scraper.py`.
 
-- **CLI** (from `wsb-etf-sentinel/`, with `DATABASE_URL` and `GEMINI_API_KEY` set):
+**Gemini structured output** (`wsb-etf-sentinel/src/analyzer.py`):
 
-  `python -m src.main --after 1year --limit 50 --max-posts-scan 1200`
+The model is configured with `GenerationConfig(response_mime_type="application/json", response_schema=…)` so the API returns **valid JSON** matching this shape (same idea as Gemini “structured output” / JSON schema mode):
 
-  Optional: `--date 2026-04-03` tags the ETF row in Postgres; `--compare-date` sets the changelog baseline.
+| Schema (conceptual) | |
+|---------------------|---|
+| Root | **Array** of objects |
+| Each item | **`ticker`**: string (US symbol, e.g. `TSLA`) |
+| | **`sentiment`**: exactly one of **`bullish`**, **`bearish`**, **`neutral`** |
 
-- **HTTP:** Run `python -m src.sync_server` with `SYNC_HTTP_PORT=8080`, then `POST /sync` with JSON such as `{ "after": "1year", "limit": 50, "maxPostsScan": 1200 }`. Point the API’s `PIPELINE_SYNC_URL` at that service and call `POST /api/sync` with the same body (and `SYNC_SECRET` if configured).
+Example model response (one post that mentions two names):
+
+```json
+[
+  { "ticker": "TSLA", "sentiment": "bullish" },
+  { "ticker": "NVDA", "sentiment": "neutral" }
+]
+```
+
+No tickers in the post → **`[]`**. After all posts are processed, duplicate tickers across posts are collapsed to **one sentiment per ticker** by **summing post scores per sentiment** and taking the **max** before `calculator.compute_composition` runs.
+
+**Pipeline defaults (`wsb-etf-sentinel`):**
+
+- **Timezone:** ETF **`--date`** and the default “today” when `--date` is omitted use **`America/New_York`** (handles EST/EDT).
+- **`--date` (CLI) or `date` (JSON):** Calendar date written to Postgres for composition / price / changelog. Default: **today in Eastern**.
+- **`--after` / `--before`:** Passed to Arctic Shift (see their docs: ISO dates, epoch, or relative values like `2d`, `1year`). If **both** are omitted, the window is **`(ETF date − 7 days)` → `ETF date`** as `YYYY-MM-DD` (seven **calendar** days leading up to and not including the end boundary semantics their API applies to `before`).
+- **`--compare-date` / `compareDate`:** Changelog baseline composition date. Default: **7 calendar days before** the ETF date.
+- **`--limit` / `limit`:** How many highest‑`score` posts to send to Gemini after filters (default **200**).
+- **`--max-posts-scan` / `maxPostsScan`:** Target max **eligible** posts to collect before sorting (default **15000**). **`scraper.fetch_top_posts_by_score`** uses **`max_pages` = 25** (up to **100** posts per Arctic Shift page), so each run **fetches at most ~2,500 raw posts** from the API unless you raise `max_pages` in code—only then can a higher `max_posts_scan` matter.
+- **`min_score`:** Hardcoded **10** in `fetch_top_posts_by_score` (not a CLI flag)—posts below that **archived** score are dropped after the body filter.
+
+**Backfill example (CLI)** — explicit window and caps:
+
+```bash
+cd wsb-etf-sentinel
+python -m src.main --date 2026-04-08 --after 2026-03-01 --before 2026-04-08 --limit 200 --max-posts-scan 15000
+```
+
+**HTTP sync** — With `SYNC_HTTP_PORT=8080`, run `python -m src.sync_server`, then `POST /sync` with JSON (camelCase as below). Omit `after` / `before` for the same **7-day** default as the CLI. Default `date` when omitted: **today (Eastern)**. Point the API’s `PIPELINE_SYNC_URL` at this service and call `POST /api/sync` with the same body (and `SYNC_SECRET` if configured).
+
+```json
+{
+  "date": "2026-04-08",
+  "compareDate": "2026-04-01",
+  "after": "2026-03-01",
+  "before": "2026-04-08",
+  "limit": 200,
+  "maxPostsScan": 15000
+}
+```
 
 ---
 
 ## Database schema
 
 The pipeline ensures these tables exist (see `wsb-etf-sentinel/src/db.py`):
+
+```mermaid
+erDiagram
+  etf_data_points {
+    serial id PK
+    numeric price
+    date date
+  }
+  etf_composition {
+    serial id PK
+    varchar ticker
+    numeric percentage
+    date date
+  }
+  etf_changelog {
+    serial id PK
+    varchar action
+    varchar ticker
+    numeric weight
+    date date
+  }
+```
+
+**Constraints (not drawn as edges):** `etf_composition` has **`UNIQUE (date, ticker)`**. `etf_data_points` has **`UNIQUE (date)`** — one NAV-style price per `date`. `etf_changelog.action` values are **`added`**, **`removed`**, **`rebalanced`**. Rows across tables are associated by the same **`date`** (business “ETF run”); there are no foreign keys.
 
 | Table | Purpose |
 |-------|---------|

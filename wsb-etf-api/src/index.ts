@@ -1,6 +1,7 @@
 import "dotenv/config";
 import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
+import morgan from "morgan";
 
 import pool from "./db.js";
 import compositionRouter from "./routes/composition.js";
@@ -12,6 +13,7 @@ import errorHandler from "./middleware/errorHandler.js";
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 app.use(cors());
 app.use(express.json());
 

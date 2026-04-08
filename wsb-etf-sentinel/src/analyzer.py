@@ -1,6 +1,9 @@
 import json
 import logging
+import threading
 import time
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 
 import google.generativeai as genai
@@ -10,100 +13,147 @@ from src.scraper import RedditPost
 
 log = logging.getLogger("pipeline")
 
-BATCH_SIZE = 10
+RESPONSE_SCHEMA = {
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "ticker": {
+                "type": "string",
+                "description": "Uppercase US stock ticker symbol (e.g. TSLA, AAPL)",
+            },
+            "sentiment": {
+                "type": "string",
+                "enum": ["bullish", "bearish", "neutral"],
+            },
+        },
+        "required": ["ticker", "sentiment"],
+    },
+}
+
+PROMPT_TEMPLATE = (
+    "You are a financial sentiment analyst. Analyze this Reddit post "
+    "from r/wallstreetbets.\n\n"
+    "1. Identify every real, tradeable US stock ticker mentioned or implied "
+    "(e.g. 'Tesla' → TSLA, 'Apple' → AAPL). Ignore ETFs, indices, "
+    "crypto, and non-stock references.\n"
+    "2. For each ticker, determine the sentiment: "
+    '"bullish", "bearish", or "neutral".\n\n'
+    "If the post mentions no real stock ticker, return an empty array.\n\n"
+    "Post (score: {score}):\n"
+    "Title: {title}\n"
+    "Body: {body}"
+)
 
 
 @dataclass
 class TickerSentiment:
     ticker: str
     sentiment: str  # "bullish" | "bearish" | "neutral"
+    score: int = 0  # reddit score of the post that produced this signal
 
 
-def _build_prompt(posts: list[RedditPost]) -> str:
-    """Build a sentiment analysis prompt for a batch of posts."""
-    post_texts: list[str] = []
-    for i, post in enumerate(posts, 1):
-        body_preview = post.body[:500] if post.body else "(no body)"
-        post_texts.append(
-            f"Post {i} (score: {post.score}, tickers: {', '.join(post.tickers)}):\n"
-            f"Title: {post.title}\n"
-            f"Body: {body_preview}"
+def _build_prompt(post: RedditPost) -> str:
+    body = post.body[:2000] if post.body else "(no body)"
+    return PROMPT_TEMPLATE.format(score=post.score, title=post.title, body=body)
+
+
+def _merge_sentiments(signals: list[TickerSentiment]) -> list[TickerSentiment]:
+    """Aggregate per-post signals into one sentiment per ticker, weighted by Reddit score."""
+    ticker_votes: dict[str, Counter] = {}
+    for s in signals:
+        if s.ticker not in ticker_votes:
+            ticker_votes[s.ticker] = Counter()
+        ticker_votes[s.ticker][s.sentiment] += s.score
+
+    merged: list[TickerSentiment] = []
+    for ticker, votes in sorted(ticker_votes.items()):
+        winner = votes.most_common(1)[0][0]
+        merged.append(TickerSentiment(ticker=ticker, sentiment=winner, score=votes[winner]))
+        log.debug(
+            "%s: %s (bullish=%d, bearish=%d, neutral=%d)",
+            ticker, winner,
+            votes.get("bullish", 0), votes.get("bearish", 0), votes.get("neutral", 0),
         )
 
-    joined = "\n\n".join(post_texts)
-
-    return (
-        "You are a financial sentiment analyst. Analyze the following Reddit posts "
-        "from r/wallstreetbets and determine the sentiment for each stock ticker "
-        "mentioned.\n\n"
-        "For each ticker mentioned across all posts, provide a single overall sentiment: "
-        '"bullish", "bearish", or "neutral".\n\n'
-        "Respond ONLY with a JSON array of objects, each with keys "
-        '"ticker" (string) and "sentiment" (string). '
-        "No markdown, no explanation, just the JSON array.\n\n"
-        f"Posts:\n\n{joined}"
-    )
+    return merged
 
 
-def _parse_response(text: str) -> list[TickerSentiment]:
-    """Parse Gemini response into TickerSentiment objects."""
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        lines = cleaned.split("\n")
-        lines = lines[1:]  # drop opening ```json
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        cleaned = "\n".join(lines)
+MAX_WORKERS = 10
 
-    try:
-        items = json.loads(cleaned)
-    except json.JSONDecodeError:
-        log.error("Failed to parse Gemini response as JSON: %s", cleaned[:200])
-        return []
 
-    results: list[TickerSentiment] = []
-    for item in items:
-        ticker = item.get("ticker", "").upper()
-        sentiment = item.get("sentiment", "").lower()
-        if ticker and sentiment in ("bullish", "bearish", "neutral"):
-            results.append(TickerSentiment(ticker=ticker, sentiment=sentiment))
+def _analyze_one(
+    model: genai.GenerativeModel,
+    post: RedditPost,
+    index: int,
+    total: int,
+    max_retries: int,
+    progress_lock: threading.Lock,
+    progress: list[int],
+) -> list[TickerSentiment]:
+    """Analyze a single post with retries. Thread-safe."""
+    prompt = _build_prompt(post)
+    signals: list[TickerSentiment] = []
 
-    return results
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = model.generate_content(prompt)
+            items = json.loads(response.text)
+            for item in items:
+                signals.append(TickerSentiment(
+                    ticker=item["ticker"].upper(),
+                    sentiment=item["sentiment"],
+                    score=post.score,
+                ))
+            break
+        except Exception as exc:
+            log.warning("Gemini request failed post %d (attempt %d/%d): %s", index, attempt, max_retries, exc)
+            if attempt == max_retries:
+                log.error("Skipping post %d after %d failures", index, max_retries)
+            else:
+                time.sleep(2 ** attempt)
+
+    with progress_lock:
+        progress[0] += 1
+        if progress[0] % 10 == 0 or progress[0] == total:
+            log.info("Sentiment progress: %d/%d posts complete", progress[0], total)
+
+    return signals
 
 
 def analyze_sentiment(
     posts: list[RedditPost],
     max_retries: int = 3,
+    max_workers: int = MAX_WORKERS,
 ) -> list[TickerSentiment]:
-    """Send posts to Gemini Flash for sentiment analysis, in batches."""
+    """Analyze posts in parallel with Gemini, then merge by score-weighted vote."""
     api_key = get_gemini_api_key()
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-2.0-flash")
+    model = genai.GenerativeModel(
+        "gemini-3.1-flash-lite-preview",
+        generation_config=genai.GenerationConfig(
+            response_mime_type="application/json",
+            response_schema=RESPONSE_SCHEMA,
+        ),
+    )
 
-    all_sentiments: dict[str, TickerSentiment] = {}
+    log.info("Analyzing %d posts with %d workers", len(posts), max_workers)
+    all_signals: list[TickerSentiment] = []
+    progress_lock = threading.Lock()
+    progress = [0]
 
-    for batch_start in range(0, len(posts), BATCH_SIZE):
-        batch = posts[batch_start : batch_start + BATCH_SIZE]
-        prompt = _build_prompt(batch)
-        batch_num = batch_start // BATCH_SIZE + 1
-        total_batches = (len(posts) + BATCH_SIZE - 1) // BATCH_SIZE
-        log.info("Analyzing batch %d/%d (%d posts)", batch_num, total_batches, len(batch))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(
+                _analyze_one, model, post, i, len(posts), max_retries, progress_lock, progress
+            ): i
+            for i, post in enumerate(posts, 1)
+        }
+        for future in as_completed(futures):
+            all_signals.extend(future.result())
 
-        for attempt in range(1, max_retries + 1):
-            try:
-                response = model.generate_content(prompt)
-                sentiments = _parse_response(response.text)
-                for s in sentiments:
-                    all_sentiments[s.ticker] = s
-                break
-            except Exception as exc:
-                log.warning("Gemini request failed (attempt %d/%d): %s", attempt, max_retries, exc)
-                if attempt == max_retries:
-                    log.error("Skipping batch %d after %d failures", batch_num, max_retries)
-                else:
-                    time.sleep(2 ** attempt)
-
-    results = list(all_sentiments.values())
+    log.info("Raw signals: %d across %d posts", len(all_signals), len(posts))
+    results = _merge_sentiments(all_signals)
     log.info(
         "Sentiment analysis complete: %d tickers (%d bullish, %d bearish, %d neutral)",
         len(results),
