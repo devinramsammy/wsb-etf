@@ -1,0 +1,38 @@
+import "dotenv/config";
+import express, { Request, Response, NextFunction } from "express";
+import cors from "cors";
+
+import pool from "./db.js";
+import compositionRouter from "./routes/composition.js";
+import priceHistoryRouter from "./routes/priceHistory.js";
+import changelogRouter from "./routes/changelog.js";
+import syncRouter from "./routes/sync.js";
+import errorHandler from "./middleware/errorHandler.js";
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.use(cors());
+app.use(express.json());
+
+// --- Routes ---
+app.get("/api/health", async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    await pool.query("SELECT 1");
+    res.json({ status: "ok" });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.use("/api/composition", compositionRouter);
+app.use("/api/price-history", priceHistoryRouter);
+app.use("/api/changelog", changelogRouter);
+app.use("/api/sync", syncRouter);
+
+// --- Error handling ---
+app.use(errorHandler);
+
+app.listen(PORT, () => {
+  console.log(`API listening on port ${PORT}`);
+});

@@ -1,0 +1,178 @@
+@import "tailwindcss";
+
+/* After-hours prospectus: ink navy, mint data line, editorial serif + calm sans + mono tickers */
+@theme {
+  --font-display: "Fraunces", "Georgia", "Times New Roman", serif;
+  --font-sans: "Lexend", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  --color-background: oklch(0.12 0.038 260);
+  --color-foreground: oklch(0.97 0.012 95);
+  --color-card: oklch(0.155 0.042 258);
+  --color-card-foreground: oklch(0.97 0.012 95);
+  --color-popover: oklch(0.155 0.042 258);
+  --color-popover-foreground: oklch(0.97 0.012 95);
+  --color-primary: oklch(0.82 0.16 168);
+  --color-primary-foreground: oklch(0.14 0.04 260);
+  --color-secondary: oklch(0.22 0.04 258);
+  --color-secondary-foreground: oklch(0.92 0.02 95);
+  --color-muted: oklch(0.22 0.035 258);
+  --color-muted-foreground: oklch(0.62 0.04 250);
+  --color-accent: oklch(0.24 0.05 258);
+  --color-accent-foreground: oklch(0.97 0.012 95);
+  --color-destructive: oklch(0.55 0.2 25);
+  --color-destructive-foreground: oklch(0.97 0.02 95);
+  --color-border: oklch(0.3 0.045 255);
+  --color-input: oklch(0.26 0.04 258);
+  --color-ring: oklch(0.72 0.12 175);
+  --color-chart-1: oklch(0.72 0.14 175);
+  --color-chart-2: oklch(0.65 0.12 230);
+  --color-chart-3: oklch(0.7 0.14 145);
+  --color-chart-4: oklch(0.62 0.18 300);
+  --color-chart-5: oklch(0.68 0.16 55);
+
+  --radius-sm: 0.25rem;
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius: 0.75rem;
+}
+
+@keyframes design-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    @apply border-border;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: var(--font-sans);
+    font-weight: 450;
+    position: relative;
+    min-height: 100vh;
+  }
+
+  /* Atmospheric depth: cool spotlight + warm counter-glow */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -2;
+    background:
+      radial-gradient(
+        ellipse 100% 70% at 0% -10%,
+        oklch(0.28 0.09 265 / 0.45),
+        transparent 55%
+      ),
+      radial-gradient(
+        ellipse 80% 50% at 100% 20%,
+        oklch(0.22 0.06 175 / 0.18),
+        transparent 45%
+      ),
+      radial-gradient(
+        ellipse 60% 40% at 50% 100%,
+        oklch(0.18 0.05 260 / 0.5),
+        transparent 50%
+      );
+    pointer-events: none;
+  }
+
+  /* Film grain */
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    opacity: 0.055;
+    pointer-events: none;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-repeat: repeat;
+    background-size: 200px 200px;
+  }
+}
+
+@layer utilities {
+  .animate-design-in {
+    animation: design-fade-up 0.8s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    opacity: 0;
+  }
+
+  .design-delay-1 {
+    animation-delay: 70ms;
+  }
+  .design-delay-2 {
+    animation-delay: 140ms;
+  }
+  .design-delay-3 {
+    animation-delay: 220ms;
+  }
+  .design-delay-4 {
+    animation-delay: 300ms;
+  }
+  .design-delay-5 {
+    animation-delay: 380ms;
+  }
+
+  .text-gradient-accent {
+    background: linear-gradient(
+      120deg,
+      oklch(0.88 0.14 168) 0%,
+      oklch(0.78 0.12 200) 100%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-design-in {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .design-delay-1,
+  .design-delay-2,
+  .design-delay-3,
+  .design-delay-4,
+  .design-delay-5 {
+    animation-delay: 0ms;
+  }
+
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+::-webkit-scrollbar-track {
+  background: oklch(0.14 0.035 258);
+}
+::-webkit-scrollbar-thumb {
+  background: oklch(0.35 0.05 255);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.42 0.06 255);
+}
