@@ -27,6 +27,9 @@ Thumbs.db
 *.swp
 *.swo
 
+# Skills
+skills-lock.json
+
 # Logs
 *.log
 npm-debug.log*
