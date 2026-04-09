@@ -30,7 +30,7 @@ router.get(
         }
 
         const { rows } = await pool.query<CompositionRow>(
-          "SELECT ticker, percentage FROM etf_composition WHERE date = $1 ORDER BY percentage DESC",
+          "SELECT ticker, percentage, shares, price FROM etf_composition WHERE date = $1 ORDER BY percentage DESC",
           [date],
         );
 
@@ -39,7 +39,7 @@ router.get(
 
       // No date param — return latest day's composition
       const { rows } = await pool.query<CompositionRow>(
-        `SELECT ticker, percentage
+        `SELECT ticker, percentage, shares, price
        FROM etf_composition
        WHERE date = (SELECT MAX(date) FROM etf_composition)
        ORDER BY percentage DESC`,

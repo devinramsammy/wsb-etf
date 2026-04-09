@@ -7,7 +7,7 @@ import pool from "./db.js";
 import compositionRouter from "./routes/composition.js";
 import priceHistoryRouter from "./routes/priceHistory.js";
 import changelogRouter from "./routes/changelog.js";
-import syncRouter from "./routes/sync.js";
+import benchmarkRouter from "./routes/benchmark.js";
 import errorHandler from "./middleware/errorHandler.js";
 
 const app = express();
@@ -30,7 +30,7 @@ app.get("/api/health", async (_req: Request, res: Response, next: NextFunction) 
 app.use("/api/composition", compositionRouter);
 app.use("/api/price-history", priceHistoryRouter);
 app.use("/api/changelog", changelogRouter);
-app.use("/api/sync", syncRouter);
+app.use("/api/benchmark", benchmarkRouter);
 
 // --- Error handling ---
 app.use(errorHandler);

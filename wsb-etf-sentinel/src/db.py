@@ -12,7 +12,7 @@ log = logging.getLogger("pipeline")
 # Baseline basket and NAV before the first sentiment-driven rebalance.
 INITIAL_COMPOSITION_DATE = datetime.date(2025, 12, 29)
 INITIAL_COMPOSITION_TICKER = "VOO"
-INITIAL_VOO_PRICE = 632.60
+INITIAL_VOO_PRICE = 630.61 
 INITIAL_ETF_PRICE = 1000.00
 
 SCHEMA_SQL = """
@@ -230,5 +230,42 @@ def get_latest_nav() -> tuple[float | None, datetime.date | None]:
             if row is None:
                 return None, None
             return float(row[0]), row[1]
+    finally:
+        conn.close()
+
+
+def get_composition_at_or_before(date: datetime.date) -> tuple[list[CompositionEntry], datetime.date | None]:
+    """Fetch the composition that was active on or before `date`."""
+    conn = _connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT DISTINCT date FROM etf_composition WHERE date <= %s ORDER BY date DESC LIMIT 1",
+                (date,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                return [], None
+            comp_date = row[0]
+        return get_composition(comp_date), comp_date
+    finally:
+        conn.close()
+
+
+
+def upsert_etf_price(price: float, date: datetime.date) -> None:
+    """Insert or update ETF NAV for a date."""
+    conn = _connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO etf_data_points (price, date) VALUES (%s, %s)
+                ON CONFLICT (date) DO UPDATE SET price = EXCLUDED.price
+                """,
+                (price, date),
+            )
+        conn.commit()
+        log.info("Upserted ETF price $%.2f for %s", price, date)
     finally:
         conn.close()

@@ -3,6 +3,8 @@
 export interface CompositionRow {
   ticker: string;
   percentage: number;
+  shares: number;
+  price: number;
 }
 
 export interface PriceRow {
@@ -44,6 +46,17 @@ export interface PriceHistoryQuery {
 
 export interface ChangelogQuery {
   date?: string;
+}
+
+export interface ChangelogMeta {
+  dates: string[];
+  totalEntries: number;
+  lastRebalanceDate: string | null;
+}
+
+export interface BenchmarkQuery {
+  from?: string;
+  to?: string;
 }
 
 // --- Express error with status ---
