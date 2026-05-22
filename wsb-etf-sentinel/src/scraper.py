@@ -15,11 +15,12 @@ class RedditPost:
     title: str
     body: str
     score: int
+    subreddit: str
     post_id: str | None = None
     created_utc: int | None = None
 
 
-def _post_from_raw(raw: dict) -> RedditPost | None:
+def _post_from_raw(raw: dict, subreddit: str) -> RedditPost | None:
     title = raw.get("title", "") or ""
     body = (raw.get("selftext", "") or "").strip()
     if not body or body == "[removed]" or body == "[deleted]":
@@ -32,6 +33,7 @@ def _post_from_raw(raw: dict) -> RedditPost | None:
         title=title,
         body=body,
         score=score,
+        subreddit=subreddit,
         post_id=str(post_id) if post_id else None,
         created_utc=created_int,
     )
@@ -115,7 +117,7 @@ def fetch_top_posts_by_score(
             if pid_s:
                 seen_ids.add(pid_s)
 
-            post = _post_from_raw(raw)
+            post = _post_from_raw(raw, subreddit)
             if post is not None and post.score >= min_score:
                 all_posts.append(post)
 
@@ -137,9 +139,15 @@ def fetch_top_posts_by_score(
     return top
 
 
-def fetch_posts(limit: int = 50, max_retries: int = 3) -> list[RedditPost]:
-    """Fetch top posts from r/wallstreetbets by score."""
+def fetch_posts(
+    limit: int = 50,
+    *,
+    subreddit: str = "wallstreetbets",
+    max_retries: int = 3,
+) -> list[RedditPost]:
+    """Fetch top posts from a subreddit by score."""
     return fetch_top_posts_by_score(
         limit=limit,
+        subreddit=subreddit,
         max_retries=max_retries,
     )

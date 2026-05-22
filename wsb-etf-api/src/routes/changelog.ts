@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from "express";
 import pool from "../db.js";
+import { parseSubredditQuery } from "../middleware/subreddit.js";
 import { ChangelogRow, ChangelogQuery, ChangelogMeta } from "../types.js";
 
 const router = Router();
@@ -14,14 +15,25 @@ function isValidDate(str: string): boolean {
 
 router.get(
   "/meta",
-  async (_req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
+      const subreddit = parseSubredditQuery(req);
+      if (typeof subreddit !== "string") {
+        return res.status(400).json({ error: subreddit.error });
+      }
+
       const [countRow, datesRows] = await Promise.all([
         pool.query<{ n: string; last: string | null }>(
-          "SELECT COUNT(*)::text AS n, MAX(date)::text AS last FROM etf_changelog",
+          `SELECT COUNT(*)::text AS n, MAX(date)::text AS last
+           FROM etf_changelog WHERE subreddit = $1`,
+          [subreddit],
         ),
         pool.query<{ date: string }>(
-          "SELECT DISTINCT date::text AS date FROM etf_changelog ORDER BY date DESC",
+          `SELECT DISTINCT date::text AS date
+           FROM etf_changelog
+           WHERE subreddit = $1
+           ORDER BY date DESC`,
+          [subreddit],
         ),
       ]);
 
@@ -50,6 +62,11 @@ router.get(
     next: NextFunction,
   ) => {
     try {
+      const subreddit = parseSubredditQuery(req);
+      if (typeof subreddit !== "string") {
+        return res.status(400).json({ error: subreddit.error });
+      }
+
       const { date } = req.query;
 
       if (date !== undefined) {
@@ -60,15 +77,22 @@ router.get(
         }
 
         const { rows } = await pool.query<ChangelogRow>(
-          "SELECT action, ticker, weight, date FROM etf_changelog WHERE date = $1 ORDER BY id DESC",
-          [date],
+          `SELECT action, ticker, weight, date
+           FROM etf_changelog
+           WHERE subreddit = $1 AND date = $2
+           ORDER BY id DESC`,
+          [subreddit, date],
         );
 
         return res.json({ data: rows });
       }
 
       const { rows } = await pool.query<ChangelogRow>(
-        "SELECT action, ticker, weight, date FROM etf_changelog ORDER BY date DESC, id DESC",
+        `SELECT action, ticker, weight, date
+         FROM etf_changelog
+         WHERE subreddit = $1
+         ORDER BY date DESC, id DESC`,
+        [subreddit],
       );
 
       res.json({ data: rows });

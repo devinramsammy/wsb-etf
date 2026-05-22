@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchPriceHistory, fetchComposition, fetchChangelogMeta } from '../api/client'
 import type { PricePoint } from '../api/client'
+import { useSubreddit } from '../context/SubredditContext'
 
 function formatCurrency(n: number): string {
   return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -127,21 +128,22 @@ const kpiExpandGridClass =
   'grid transition-[grid-template-rows] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none'
 
 function KpiStrip() {
+  const { subreddit } = useSubreddit()
   const [showMoreKpis, setShowMoreKpis] = useState(false)
 
   const { data: prices } = useQuery({
-    queryKey: ['priceHistory'],
-    queryFn: fetchPriceHistory,
+    queryKey: ['priceHistory', subreddit],
+    queryFn: () => fetchPriceHistory(subreddit),
   })
 
   const { data: composition } = useQuery({
-    queryKey: ['composition'],
-    queryFn: () => fetchComposition(),
+    queryKey: ['composition', subreddit],
+    queryFn: () => fetchComposition(subreddit),
   })
 
   const { data: changelogMeta } = useQuery({
-    queryKey: ['changelog-meta'],
-    queryFn: fetchChangelogMeta,
+    queryKey: ['changelog-meta', subreddit],
+    queryFn: () => fetchChangelogMeta(subreddit),
   })
 
   const metrics = useMetrics(prices)

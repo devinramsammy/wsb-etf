@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchComposition } from '../api/client'
+import { useSubreddit } from '../context/SubredditContext'
 import type { CompositionEntry } from '../api/client'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -180,9 +181,10 @@ function DonutChart({ items }: { items: CompositionEntry[] }) {
 }
 
 function Composition() {
+  const { subreddit } = useSubreddit()
   const { data, isLoading, error } = useQuery({
-    queryKey: ['composition'],
-    queryFn: () => fetchComposition(),
+    queryKey: ['composition', subreddit],
+    queryFn: () => fetchComposition(subreddit),
   })
 
   if (isLoading)

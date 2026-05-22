@@ -33,7 +33,7 @@ RESPONSE_SCHEMA = {
 
 PROMPT_TEMPLATE = (
     "You are a financial sentiment analyst. Analyze this Reddit post "
-    "from r/wallstreetbets.\n\n"
+    "from r/{subreddit}.\n\n"
     "1. Identify every real, tradeable US stock ticker mentioned or implied "
     "(e.g. 'Tesla' → TSLA, 'Apple' → AAPL). Ignore ETFs, indices, "
     "crypto, and non-stock references.\n"
@@ -55,7 +55,12 @@ class TickerSentiment:
 
 def _build_prompt(post: RedditPost) -> str:
     body = post.body[:2000] if post.body else "(no body)"
-    return PROMPT_TEMPLATE.format(score=post.score, title=post.title, body=body)
+    return PROMPT_TEMPLATE.format(
+        subreddit=post.subreddit,
+        score=post.score,
+        title=post.title,
+        body=body,
+    )
 
 
 def _merge_sentiments(signals: list[TickerSentiment]) -> list[TickerSentiment]:

@@ -4,6 +4,8 @@ import type { IChartApi, ISeriesApi, SeriesType, Time } from 'lightweight-charts
 import { useQuery } from '@tanstack/react-query'
 import { fetchPriceHistory, fetchBenchmark } from '../api/client'
 import type { PricePoint, BenchmarkPoint } from '../api/client'
+import { useSubreddit } from '../context/SubredditContext'
+import { getEtfLabel } from '@/lib/subreddits'
 
 /* ── helpers ─────────────────────────────────────────────────── */
 
@@ -49,6 +51,8 @@ interface TooltipData {
 /* ── component ───────────────────────────────────────────────── */
 
 function PriceChart() {
+  const { subreddit } = useSubreddit()
+  const etfLabel = getEtfLabel(subreddit)
   const chartRef = useRef<IChartApi | null>(null)
   const observerRef = useRef<ResizeObserver | null>(null)
   const etfSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
@@ -56,8 +60,8 @@ function PriceChart() {
   const [tooltip, setTooltip] = useState<TooltipData | null>(null)
 
   const { data: etfData, isLoading: etfLoading, error: etfError } = useQuery({
-    queryKey: ['priceHistory'],
-    queryFn: () => fetchPriceHistory(),
+    queryKey: ['priceHistory', subreddit],
+    queryFn: () => fetchPriceHistory(subreddit),
   })
 
   const { data: vooData, isLoading: vooLoading } = useQuery({
@@ -310,7 +314,7 @@ function PriceChart() {
           <div className="flex items-center gap-2">
             <span className="inline-block h-[3px] w-5 rounded-sm bg-[#4ade80]" />
             <span className="font-mono text-[0.7rem] font-semibold tracking-wide text-[#a3a3a3]">
-              WSB ETF
+              {etfLabel}
             </span>
             {latestEtf != null && (
               <span
@@ -352,7 +356,7 @@ function PriceChart() {
               {tooltip.etfReturn != null && (
                 <div className="chart-tooltip-row">
                   <span className="chart-tooltip-dot" style={{ background: '#4ade80' }} />
-                  <span className="chart-tooltip-label">WSB ETF</span>
+                  <span className="chart-tooltip-label">{etfLabel}</span>
                   <span
                     className={`chart-tooltip-value ${tooltip.etfReturn >= 0 ? 'text-[#4ade80]' : 'text-[#f87171]'}`}
                   >

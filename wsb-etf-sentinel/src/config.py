@@ -20,3 +20,17 @@ def get_gemini_api_key() -> str:
     if not key:
         raise RuntimeError("GEMINI_API_KEY environment variable is not set")
     return key
+
+
+DEFAULT_SUBREDDITS = ("wallstreetbets",)
+
+
+def get_subreddits() -> list[str]:
+    """Configured subreddits for the pipeline (comma-separated SUBREDDITS env var)."""
+    raw = os.environ.get("SUBREDDITS")
+    if not raw:
+        return list(DEFAULT_SUBREDDITS)
+    subreddits = [s.strip().lower().removeprefix("r/") for s in raw.split(",") if s.strip()]
+    if not subreddits:
+        raise RuntimeError("SUBREDDITS is set but contains no valid subreddit names")
+    return subreddits

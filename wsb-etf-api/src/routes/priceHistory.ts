@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from "express";
 import pool from "../db.js";
+import { parseSubredditQuery } from "../middleware/subreddit.js";
 import { PriceRow, PriceHistoryQuery } from "../types.js";
 
 const router = Router();
@@ -20,6 +21,11 @@ router.get(
     next: NextFunction,
   ) => {
     try {
+      const subreddit = parseSubredditQuery(req);
+      if (typeof subreddit !== "string") {
+        return res.status(400).json({ error: subreddit.error });
+      }
+
       const { from, to } = req.query;
 
       if (from !== undefined && !isValidDate(from)) {
@@ -33,8 +39,8 @@ router.get(
           .json({ error: "Invalid 'to' date format. Use YYYY-MM-DD." });
       }
 
-      const conditions: string[] = [];
-      const params: string[] = [];
+      const conditions: string[] = ["subreddit = $1"];
+      const params: string[] = [subreddit];
 
       if (from) {
         params.push(from);
@@ -45,9 +51,7 @@ router.get(
         conditions.push(`date <= $${params.length}`);
       }
 
-      const where = conditions.length
-        ? `WHERE ${conditions.join(" AND ")}`
-        : "";
+      const where = `WHERE ${conditions.join(" AND ")}`;
 
       const { rows } = await pool.query<PriceRow>(
         `SELECT price, date FROM etf_data_points ${where} ORDER BY date ASC`,

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from zoneinfo import ZoneInfo
 
 from src import scraper, analyzer, calculator, db
+from src.config import get_subreddits
 
 ET = ZoneInfo("America/New_York")
 
@@ -17,6 +18,7 @@ class RunParams:
     """Parameters for a single pipeline run (fetch → sentiment → DB)."""
 
     as_of_date: datetime.date
+    subreddit: str | None = None
     fetch_limit: int = 150
     after: str | None = None
     before: str | None = None
@@ -42,7 +44,7 @@ def _posts_window(as_of: datetime.date) -> tuple[str, str]:
 
 def run(params: RunParams | None = None) -> dict:
     """
-    Execute the full pipeline.
+    Execute the full pipeline for one subreddit.
 
     --date is the price date (default: today). The pipeline fetches posts from
     the previous 7 days to derive sentiment, then records the ETF price under --date.
@@ -52,7 +54,11 @@ def run(params: RunParams | None = None) -> dict:
     if params is None:
         params = RunParams(as_of_date=datetime.datetime.now(ET).date())
 
+    if not params.subreddit:
+        raise ValueError("RunParams.subreddit is required for run()")
+
     as_of = params.as_of_date
+    subreddit = params.subreddit
     compare_day = params.compare_to_date
     if compare_day is None:
         compare_day = as_of - datetime.timedelta(weeks=1)
@@ -63,37 +69,39 @@ def run(params: RunParams | None = None) -> dict:
         after, before = _posts_window(as_of)
 
     posts_day = (datetime.date.fromisoformat(after) if after else as_of - datetime.timedelta(days=1))
-    log.info("Pipeline for %s — using posts from %s", as_of, posts_day)
+    log.info("Pipeline for r/%s on %s — using posts from %s", subreddit, as_of, posts_day)
 
     log.info("--- Step 0: Ensuring database tables ---")
     db.ensure_tables()
+    db.ensure_initial_baseline(subreddit)
 
-    log.info("--- Step 1: Fetching Reddit posts (%s → %s) ---", after, before)
+    log.info("--- Step 1: Fetching Reddit posts from r/%s (%s → %s) ---", subreddit, after, before)
     posts = scraper.fetch_top_posts_by_score(
         limit=params.fetch_limit,
+        subreddit=subreddit,
         after=after,
         before=before,
         max_posts_scan=params.max_posts_scan,
     )
     if not posts:
-        log.warning("No posts found. Exiting.")
-        return {"ok": False, "error": "no_posts", "as_of": str(as_of)}
+        log.warning("No posts found for r/%s. Exiting.", subreddit)
+        return {"ok": False, "error": "no_posts", "as_of": str(as_of), "subreddit": subreddit}
 
     log.info("--- Step 2: Running sentiment analysis ---")
     sentiments = analyzer.analyze_sentiment(posts)
     if not sentiments:
-        log.warning("No sentiment results. Exiting.")
-        return {"ok": False, "error": "no_sentiment", "as_of": str(as_of)}
+        log.warning("No sentiment results for r/%s. Exiting.", subreddit)
+        return {"ok": False, "error": "no_sentiment", "as_of": str(as_of), "subreddit": subreddit}
 
     log.info("--- Step 3: Computing ETF composition ---")
     composition = calculator.compute_composition(sentiments)
     if not composition:
-        log.warning("Empty composition. Exiting.")
-        return {"ok": False, "error": "empty_composition", "as_of": str(as_of)}
+        log.warning("Empty composition for r/%s. Exiting.", subreddit)
+        return {"ok": False, "error": "empty_composition", "as_of": str(as_of), "subreddit": subreddit}
 
     log.info("--- Step 4: Rebalancing ETF (NAV-based) ---")
-    prev_entries, prev_date = db.get_latest_composition()
-    prev_nav, _ = db.get_latest_nav()
+    prev_entries, prev_date = db.get_latest_composition(subreddit)
+    prev_nav, _ = db.get_latest_nav(subreddit)
     initial_nav = prev_nav if prev_nav is not None else db.INITIAL_ETF_PRICE
 
     result = calculator.rebalance(
@@ -103,21 +111,22 @@ def run(params: RunParams | None = None) -> dict:
         initial_nav=initial_nav,
     )
     if result is None:
-        log.warning("Rebalance failed. Exiting.")
-        return {"ok": False, "error": "rebalance_failed", "as_of": str(as_of)}
+        log.warning("Rebalance failed for r/%s. Exiting.", subreddit)
+        return {"ok": False, "error": "rebalance_failed", "as_of": str(as_of), "subreddit": subreddit}
 
     log.info("--- Step 5: Diffing against previous composition ---")
-    prior_composition = db.get_composition(compare_day)
+    prior_composition = db.get_composition(compare_day, subreddit)
     changelog = calculator.diff_composition(result.entries, prior_composition)
 
     log.info("--- Step 6: Writing results to database ---")
-    db.insert_composition(result.entries, as_of)
-    db.insert_etf_price(result.nav, as_of)
-    db.insert_changelog(changelog, as_of)
+    db.insert_composition(result.entries, as_of, subreddit)
+    db.insert_etf_price(result.nav, as_of, subreddit)
+    db.insert_changelog(changelog, as_of, subreddit)
 
-    log.info("Pipeline complete for %s — NAV: $%.2f", as_of, result.nav)
+    log.info("Pipeline complete for r/%s on %s — NAV: $%.2f", subreddit, as_of, result.nav)
     return {
         "ok": True,
+        "subreddit": subreddit,
         "as_of": str(as_of),
         "posts_analyzed": len(posts),
         "tickers": len(sentiments),
@@ -126,13 +135,30 @@ def run(params: RunParams | None = None) -> dict:
     }
 
 
+def run_all(params_base: RunParams) -> list[dict]:
+    """Run the pipeline for each configured subreddit."""
+    results: list[dict] = []
+    for subreddit in get_subreddits():
+        params = RunParams(
+            as_of_date=params_base.as_of_date,
+            subreddit=subreddit,
+            fetch_limit=params_base.fetch_limit,
+            after=params_base.after,
+            before=params_base.before,
+            max_posts_scan=params_base.max_posts_scan,
+            compare_to_date=params_base.compare_to_date,
+        )
+        results.append(run(params))
+    return results
+
+
 def _parse_date(s: str) -> datetime.date:
     return datetime.date.fromisoformat(s)
 
 
 def main() -> None:
     setup_logging()
-    parser = argparse.ArgumentParser(description="WSB ETF sentiment pipeline")
+    parser = argparse.ArgumentParser(description="Reddit sentiment ETF pipeline")
     parser.add_argument(
         "--date",
         type=str,
@@ -144,6 +170,12 @@ def main() -> None:
         type=str,
         default=None,
         help="Changelog baseline date (YYYY-MM-DD). Default: 7 days before --date.",
+    )
+    parser.add_argument(
+        "--subreddit",
+        type=str,
+        default=None,
+        help="Run for a single subreddit (e.g. investing). Default: all configured subreddits.",
     )
     parser.add_argument("--limit", type=int, default=150, help="How many top-by-score posts to analyze")
     parser.add_argument(
@@ -171,6 +203,7 @@ def main() -> None:
 
     params = RunParams(
         as_of_date=as_of,
+        subreddit=args.subreddit.lower().removeprefix("r/") if args.subreddit else None,
         fetch_limit=args.limit,
         after=args.after,
         before=args.before,
@@ -179,8 +212,12 @@ def main() -> None:
     )
 
     try:
-        result = run(params)
-        if not result.get("ok"):
+        if args.subreddit:
+            results = [run(params)]
+        else:
+            results = run_all(params)
+
+        if not all(r.get("ok") for r in results):
             sys.exit(1)
     except Exception:
         log.exception("Pipeline failed")

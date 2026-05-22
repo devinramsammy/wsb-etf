@@ -1,15 +1,15 @@
 """
-Daily NAV tracker for the WSB ETF.
+Daily NAV tracker for Reddit sentiment ETFs.
 
 Calculates the ETF's net asset value by pricing the current composition
 (shares × closing price) using yfinance. No rebalancing — just a price snapshot.
 
 Usage:
-    # Today's NAV (default)
+    # Today's NAV for all configured subreddits (default)
     python -m src.nav_tracker
 
-    # Specific date
-    python -m src.nav_tracker --date 2026-04-07
+    # Specific date and subreddit
+    python -m src.nav_tracker --date 2026-04-07 --subreddit investing
 """
 
 import argparse
@@ -20,22 +20,29 @@ from zoneinfo import ZoneInfo
 
 from src import db
 from src.calculator import fetch_prices
+from src.config import get_subreddits
 
 ET = ZoneInfo("America/New_York")
 log = logging.getLogger("pipeline")
 
 
-def compute_nav(date: datetime.date) -> float | None:
+def compute_nav(date: datetime.date, subreddit: str) -> float | None:
     """
     Compute NAV for `date` using the composition that was active on that date.
     Returns the NAV or None if pricing failed.
     """
-    entries, comp_date = db.get_composition_at_or_before(date)
+    entries, comp_date = db.get_composition_at_or_before(date, subreddit)
     if not entries:
-        log.warning("No composition found on or before %s", date)
+        log.warning("No composition found for r/%s on or before %s", subreddit, date)
         return None
 
-    log.info("Using composition from %s (%d holdings) for %s", comp_date, len(entries), date)
+    log.info(
+        "Using composition from %s (%d holdings) for r/%s on %s",
+        comp_date,
+        len(entries),
+        subreddit,
+        date,
+    )
 
     tickers = [e.ticker for e in entries]
     prices = fetch_prices(tickers, date)
@@ -54,16 +61,16 @@ def compute_nav(date: datetime.date) -> float | None:
             nav += entry.shares * entry.price
 
     nav = round(nav, 2)
-    log.info("NAV for %s: $%.2f", date, nav)
+    log.info("NAV for r/%s on %s: $%.2f", subreddit, date, nav)
     return nav
 
 
-def track(date: datetime.date) -> bool:
-    """Compute and store NAV for a single date."""
-    nav = compute_nav(date)
+def track(date: datetime.date, subreddit: str) -> bool:
+    """Compute and store NAV for a single date and subreddit."""
+    nav = compute_nav(date, subreddit)
     if nav is None:
         return False
-    db.upsert_etf_price(nav, date)
+    db.upsert_etf_price(nav, date, subreddit)
     return True
 
 
@@ -75,14 +82,32 @@ def main() -> None:
         handlers=[logging.StreamHandler(sys.stdout)],
     )
 
-    parser = argparse.ArgumentParser(description="WSB ETF daily NAV tracker")
+    parser = argparse.ArgumentParser(description="Reddit sentiment ETF daily NAV tracker")
     parser.add_argument("--date", type=str, default=None, help="NAV date (YYYY-MM-DD). Default: today ET.")
+    parser.add_argument(
+        "--subreddit",
+        type=str,
+        default=None,
+        help="Track a single subreddit. Default: all configured subreddits.",
+    )
     args = parser.parse_args()
 
     db.ensure_tables()
 
     date = datetime.date.fromisoformat(args.date) if args.date else datetime.datetime.now(ET).date()
-    if not track(date):
+    subreddits = (
+        [args.subreddit.lower().removeprefix("r/")]
+        if args.subreddit
+        else get_subreddits()
+    )
+
+    failed = False
+    for subreddit in subreddits:
+        db.ensure_initial_baseline(subreddit)
+        if not track(date, subreddit):
+            failed = True
+
+    if failed:
         sys.exit(1)
 
 

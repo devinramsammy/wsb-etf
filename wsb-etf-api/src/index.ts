@@ -8,6 +8,7 @@ import compositionRouter from "./routes/composition.js";
 import priceHistoryRouter from "./routes/priceHistory.js";
 import changelogRouter from "./routes/changelog.js";
 import benchmarkRouter from "./routes/benchmark.js";
+import subredditsRouter from "./routes/subreddits.js";
 import errorHandler from "./middleware/errorHandler.js";
 
 const app = express();
@@ -31,6 +32,7 @@ app.use("/api/composition", compositionRouter);
 app.use("/api/price-history", priceHistoryRouter);
 app.use("/api/changelog", changelogRouter);
 app.use("/api/benchmark", benchmarkRouter);
+app.use("/api/subreddits", subredditsRouter);
 
 // --- Error handling ---
 app.use(errorHandler);

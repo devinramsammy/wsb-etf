@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchChangelog, fetchChangelogMeta } from '../api/client'
 import type { ChangelogEntry } from '../api/client'
+import { useSubreddit } from '../context/SubredditContext'
 import { cn } from '@/lib/utils'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -52,18 +53,19 @@ function actionLabel(action: string): string {
 }
 
 function Changelog() {
+  const { subreddit } = useSubreddit()
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
 
   const { data: meta, isLoading: metaLoading, error: metaError } = useQuery({
-    queryKey: ['changelog-meta'],
-    queryFn: fetchChangelogMeta,
+    queryKey: ['changelog-meta', subreddit],
+    queryFn: () => fetchChangelogMeta(subreddit),
   })
 
   const effectiveDate = selectedDate ?? meta?.dates[0] ?? null
 
   const { data: rows, isLoading: rowsLoading, error: rowsError } = useQuery({
-    queryKey: ['changelog', effectiveDate],
-    queryFn: () => fetchChangelog(effectiveDate!),
+    queryKey: ['changelog', subreddit, effectiveDate],
+    queryFn: () => fetchChangelog(subreddit, effectiveDate!),
     enabled: !!effectiveDate,
   })
 

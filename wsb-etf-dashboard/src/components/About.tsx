@@ -1,10 +1,15 @@
 import { useQuery } from '@tanstack/react-query'
 import { fetchChangelogMeta } from '../api/client'
+import { useSubreddit } from '../context/SubredditContext'
+import { getSubredditConfig } from '@/lib/subreddits'
 
 function About() {
+  const { subreddit } = useSubreddit()
+  const source = getSubredditConfig(subreddit)
+
   const { data: changelogMeta } = useQuery({
-    queryKey: ['changelog-meta'],
-    queryFn: fetchChangelogMeta,
+    queryKey: ['changelog-meta', subreddit],
+    queryFn: () => fetchChangelogMeta(subreddit),
   })
 
   const rebalanceCount = changelogMeta != null ? changelogMeta.dates.length : null
@@ -14,7 +19,7 @@ function About() {
       <h2 className="about-title">About</h2>
 
       <p className="about-desc">
-        A synthetic ETF derived from r/wallstreetbets. Posts from the subreddit are
+        A synthetic ETF derived from {source.name}. Posts from the subreddit are
         analyzed by{' '}
         <span className="font-mono">gemini-3.1-flash-lite-preview</span>{' '}
         for sentiment per ticker.         Signals are merged with Reddit score-weighted
@@ -26,7 +31,7 @@ function About() {
       <div className="about-details">
         <div className="about-detail-row">
           <span className="about-detail-label">Data Source</span>
-          <span className="about-detail-value">r/wallstreetbets</span>
+          <span className="about-detail-value">{source.name}</span>
         </div>
         <div className="about-detail-row">
           <span className="about-detail-label">Sentiment Model</span>

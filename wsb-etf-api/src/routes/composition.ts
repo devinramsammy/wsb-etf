@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from "express";
 import pool from "../db.js";
+import { parseSubredditQuery } from "../middleware/subreddit.js";
 import { CompositionRow, CompositionQuery } from "../types.js";
 
 const router = Router();
@@ -20,6 +21,11 @@ router.get(
     next: NextFunction,
   ) => {
     try {
+      const subreddit = parseSubredditQuery(req);
+      if (typeof subreddit !== "string") {
+        return res.status(400).json({ error: subreddit.error });
+      }
+
       const { date } = req.query;
 
       if (date !== undefined) {
@@ -30,19 +36,25 @@ router.get(
         }
 
         const { rows } = await pool.query<CompositionRow>(
-          "SELECT ticker, percentage, shares, price FROM etf_composition WHERE date = $1 ORDER BY percentage DESC",
-          [date],
+          `SELECT ticker, percentage, shares, price
+           FROM etf_composition
+           WHERE subreddit = $1 AND date = $2
+           ORDER BY percentage DESC`,
+          [subreddit, date],
         );
 
         return res.json({ data: rows });
       }
 
-      // No date param — return latest day's composition
       const { rows } = await pool.query<CompositionRow>(
         `SELECT ticker, percentage, shares, price
-       FROM etf_composition
-       WHERE date = (SELECT MAX(date) FROM etf_composition)
-       ORDER BY percentage DESC`,
+         FROM etf_composition
+         WHERE subreddit = $1
+           AND date = (
+             SELECT MAX(date) FROM etf_composition WHERE subreddit = $1
+           )
+         ORDER BY percentage DESC`,
+        [subreddit],
       );
 
       res.json({ data: rows });

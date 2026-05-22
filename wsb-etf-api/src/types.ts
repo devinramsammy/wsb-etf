@@ -37,15 +37,18 @@ export interface HealthResponse {
 
 export interface CompositionQuery {
   date?: string;
+  subreddit?: string;
 }
 
 export interface PriceHistoryQuery {
   from?: string;
   to?: string;
+  subreddit?: string;
 }
 
 export interface ChangelogQuery {
   date?: string;
+  subreddit?: string;
 }
 
 export interface ChangelogMeta {

@@ -4,6 +4,7 @@ import { fetchComposition, fetchChangelog, fetchChangelogMeta } from '../api/cli
 import type { ChangelogEntry, CompositionEntry } from '../api/client'
 import { cn } from '@/lib/utils'
 import KpiStrip from './KpiStrip'
+import { useSubreddit } from '../context/SubredditContext'
 
 /* ── helpers ─────────────────────────────────────────────────── */
 
@@ -286,19 +287,20 @@ function HoldingsTab({ data }: { data: CompositionEntry[] }) {
 /* ── Rebalance log tab ───────────────────────────────────────── */
 
 function RebalanceTab() {
+  const { subreddit } = useSubreddit()
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
   const [ledgerQuery, setLedgerQuery] = useState('')
 
   const { data: meta, isLoading: metaLoading, error: metaError } = useQuery({
-    queryKey: ['changelog-meta'],
-    queryFn: fetchChangelogMeta,
+    queryKey: ['changelog-meta', subreddit],
+    queryFn: () => fetchChangelogMeta(subreddit),
   })
 
   const effectiveDate = selectedDate ?? meta?.dates[0] ?? null
 
   const { data: entries, isLoading: entriesLoading, error: entriesError } = useQuery({
-    queryKey: ['changelog', effectiveDate],
-    queryFn: () => fetchChangelog(effectiveDate!),
+    queryKey: ['changelog', subreddit, effectiveDate],
+    queryFn: () => fetchChangelog(subreddit, effectiveDate!),
     enabled: !!effectiveDate,
   })
 
@@ -548,6 +550,7 @@ function RebalanceTab() {
 /* ── Main component ──────────────────────────────────────────── */
 
 function PortfolioInsight() {
+  const { subreddit } = useSubreddit()
   const [activeTab, setActiveTab] = useState<Tab>('holdings')
   const tabRowRef = useRef<HTMLDivElement>(null)
   const tabRefs = useRef<Record<Tab, HTMLButtonElement | null>>({
@@ -584,8 +587,8 @@ function PortfolioInsight() {
   }, [updateTabUnderline])
 
   const { data: composition, isLoading: compLoading, error: compError } = useQuery({
-    queryKey: ['composition'],
-    queryFn: () => fetchComposition(),
+    queryKey: ['composition', subreddit],
+    queryFn: () => fetchComposition(subreddit),
   })
 
   const isLoading = compLoading
