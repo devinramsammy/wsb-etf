@@ -349,3 +349,70 @@ def upsert_etf_price(
         log.info("Upserted ETF price $%.2f for r/%s on %s", price, subreddit, date)
     finally:
         conn.close()
+
+
+def get_distinct_changelog_dates(subreddit: str = DEFAULT_SUBREDDIT) -> list[datetime.date]:
+    """Distinct rebalance dates for a subreddit, oldest first."""
+    conn = _connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT DISTINCT date FROM etf_changelog
+                WHERE subreddit = %s
+                ORDER BY date ASC
+                """,
+                (subreddit,),
+            )
+            return [row[0] for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def get_distinct_nav_dates(
+    subreddit: str = DEFAULT_SUBREDDIT,
+    through: datetime.date | None = None,
+) -> list[datetime.date]:
+    """Distinct NAV dates for a subreddit, oldest first."""
+    conn = _connect()
+    try:
+        with conn.cursor() as cur:
+            if through is None:
+                cur.execute(
+                    """
+                    SELECT DISTINCT date FROM etf_data_points
+                    WHERE subreddit = %s
+                    ORDER BY date ASC
+                    """,
+                    (subreddit,),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT DISTINCT date FROM etf_data_points
+                    WHERE subreddit = %s AND date <= %s
+                    ORDER BY date ASC
+                    """,
+                    (subreddit, through),
+                )
+            return [row[0] for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def composition_exists(subreddit: str, date: datetime.date) -> bool:
+    """True if a composition row exists for this subreddit and date."""
+    conn = _connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT 1 FROM etf_composition
+                WHERE subreddit = %s AND date = %s
+                LIMIT 1
+                """,
+                (subreddit, date),
+            )
+            return cur.fetchone() is not None
+    finally:
+        conn.close()

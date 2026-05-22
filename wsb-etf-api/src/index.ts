@@ -10,7 +10,6 @@ import changelogRouter from "./routes/changelog.js";
 import benchmarkRouter from "./routes/benchmark.js";
 import subredditsRouter from "./routes/subreddits.js";
 import errorHandler from "./middleware/errorHandler.js";
-import { ensureDatabaseMigrated } from "./migrate.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -38,14 +37,6 @@ app.use("/api/subreddits", subredditsRouter);
 // --- Error handling ---
 app.use(errorHandler);
 
-async function start() {
-  await ensureDatabaseMigrated();
-  app.listen(PORT, () => {
-    console.log(`API listening on port ${PORT}`);
-  });
-}
-
-start().catch((err) => {
-  console.error("Failed to start API:", err);
-  process.exit(1);
+app.listen(PORT, () => {
+  console.log(`API listening on port ${PORT}`);
 });
