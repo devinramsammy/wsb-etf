@@ -84,6 +84,7 @@ def backfill(
     db.ensure_initial_baseline(subreddit)
 
     log.info("=== Phase 1: %d weekly rebalances ===", len(rebalance_dates))
+    failed_rebalances: list[tuple[datetime.date, str]] = []
     for i, as_of in enumerate(rebalance_dates, 1):
         if as_of == db.INITIAL_COMPOSITION_DATE:
             log.info(
@@ -108,8 +109,17 @@ def backfill(
             )
         )
         if not result.get("ok"):
-            log.error("Rebalance failed for %s: %s", as_of, result.get("error"))
-            return False
+            err = str(result.get("error", "unknown"))
+            log.warning("Rebalance skipped for %s: %s", as_of, err)
+            failed_rebalances.append((as_of, err))
+            continue
+
+    if failed_rebalances:
+        log.warning(
+            "Phase 1 finished with %d skipped rebalances: %s",
+            len(failed_rebalances),
+            ", ".join(f"{d} ({e})" for d, e in failed_rebalances[:5]),
+        )
 
     log.info("=== Phase 2: %d daily NAV snapshots ===", len(nav_dates))
     failed_nav: list[datetime.date] = []

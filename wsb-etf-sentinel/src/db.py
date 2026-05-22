@@ -157,7 +157,7 @@ def ensure_initial_baseline(subreddit: str = DEFAULT_SUBREDDIT) -> None:
             INITIAL_COMPOSITION_DATE,
         )
     if need_price:
-        insert_etf_price(INITIAL_ETF_PRICE, INITIAL_COMPOSITION_DATE, subreddit)
+        upsert_etf_price(INITIAL_ETF_PRICE, INITIAL_COMPOSITION_DATE, subreddit)
 
 
 def insert_composition(
