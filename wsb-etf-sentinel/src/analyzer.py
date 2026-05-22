@@ -135,7 +135,7 @@ def analyze_sentiment(
     api_key = get_gemini_api_key()
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel(
-        "gemini-3.1-flash-lite-preview",
+        "gemini-3.1-flash-lite",
         generation_config=genai.GenerationConfig(
             response_mime_type="application/json",
             response_schema=RESPONSE_SCHEMA,
