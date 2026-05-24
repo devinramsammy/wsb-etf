@@ -8,7 +8,9 @@ import { useSubreddit } from '../context/SubredditContext'
 import { getEtfLabel } from '@/lib/subreddits'
 import { BENCHMARKS, DEFAULT_BENCHMARK, type BenchmarkId } from '@/lib/benchmarks'
 import { computeAlignedReturn, normalizeBenchmarkToReturn } from '@/lib/benchmarkReturns'
+import { DEFAULT_TIME_RANGE, filterSeriesByTimeRange, type TimeRangeId } from '@/lib/timeRange'
 import ReferenceRail from './ReferenceRail'
+import TimeRangeFilter from './TimeRangeFilter'
 
 /* ── helpers ─────────────────────────────────────────────────── */
 
@@ -58,16 +60,22 @@ function PriceChart() {
   const { subreddit } = useSubreddit()
   const etfLabel = getEtfLabel(subreddit)
   const [selectedBenchmark, setSelectedBenchmark] = useState<BenchmarkId>(DEFAULT_BENCHMARK)
+  const [timeRange, setTimeRange] = useState<TimeRangeId>(DEFAULT_TIME_RANGE)
   const chartRef = useRef<IChartApi | null>(null)
   const observerRef = useRef<ResizeObserver | null>(null)
   const etfSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const benchmarkSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const [tooltip, setTooltip] = useState<TooltipData | null>(null)
 
-  const { data: etfData, isLoading: etfLoading, error: etfError } = useQuery({
+  const { data: etfDataRaw, isLoading: etfLoading, error: etfError } = useQuery({
     queryKey: ['priceHistory', subreddit],
     queryFn: () => fetchPriceHistory(subreddit),
   })
+
+  const etfData = useMemo(
+    () => (etfDataRaw ? filterSeriesByTimeRange(etfDataRaw, timeRange) : undefined),
+    [etfDataRaw, timeRange],
+  )
 
   const benchmarkQueries = useQueries({
     queries: BENCHMARKS.map((benchmark) => ({
@@ -277,7 +285,7 @@ function PriceChart() {
       resizeObserver.observe(container)
       observerRef.current = resizeObserver
     },
-    [etfData, selectedBenchmark, selectedBenchmarkData],
+    [etfData, selectedBenchmark, selectedBenchmarkData, timeRange],
   )
 
   if (isLoading)
@@ -298,7 +306,7 @@ function PriceChart() {
         </div>
       </div>
     )
-  if (!etfData || etfData.length === 0)
+  if (!etfDataRaw || etfDataRaw.length === 0)
     return (
       <div className="chart-panel h-full min-h-[280px]">
         <div className="flex flex-1 items-center justify-center py-10 font-mono text-sm text-[#475569]">
@@ -306,12 +314,29 @@ function PriceChart() {
         </div>
       </div>
     )
+  if (!etfData || etfData.length < 2)
+    return (
+      <div className="chart-panel h-full min-h-[280px]">
+        <div className="chart-header shrink-0">
+          <div className="flex flex-wrap items-center gap-3">
+            <h2 className="chart-title">Performance</h2>
+            <TimeRangeFilter value={timeRange} onChange={setTimeRange} />
+          </div>
+        </div>
+        <div className="flex flex-1 items-center justify-center py-10 font-mono text-sm text-[#475569]">
+          Not enough data for this range
+        </div>
+      </div>
+    )
 
   return (
     <div className="chart-panel h-full min-h-[280px]">
       <div className="chart-header shrink-0">
-        <div className="flex items-baseline gap-3">
-          <h2 className="chart-title">Performance</h2>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <h2 className="chart-title">Performance</h2>
+            <TimeRangeFilter value={timeRange} onChange={setTimeRange} />
+          </div>
           {firstDate && lastDate && (
             <span className="font-mono text-[0.7rem] text-[#475569]">
               {formatDateLabel(firstDate)} &ndash; {formatDateLabel(lastDate)}
