@@ -8,7 +8,7 @@ import { useSubreddit } from '../context/SubredditContext'
 import { getEtfLabel } from '@/lib/subreddits'
 import { BENCHMARKS, DEFAULT_BENCHMARK, type BenchmarkId } from '@/lib/benchmarks'
 import { computeAlignedReturn, normalizeBenchmarkToReturn } from '@/lib/benchmarkReturns'
-import { DEFAULT_TIME_RANGE, filterSeriesByTimeRange, type TimeRangeId } from '@/lib/timeRange'
+import { DEFAULT_TIME_RANGE, getChartVisibleRange, type TimeRangeId } from '@/lib/timeRange'
 import ReferenceRail from './ReferenceRail'
 import TimeRangeFilter from './TimeRangeFilter'
 
@@ -67,15 +67,10 @@ function PriceChart() {
   const benchmarkSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const [tooltip, setTooltip] = useState<TooltipData | null>(null)
 
-  const { data: etfDataRaw, isLoading: etfLoading, error: etfError } = useQuery({
+  const { data: etfData, isLoading: etfLoading, error: etfError } = useQuery({
     queryKey: ['priceHistory', subreddit],
     queryFn: () => fetchPriceHistory(subreddit),
   })
-
-  const etfData = useMemo(
-    () => (etfDataRaw ? filterSeriesByTimeRange(etfDataRaw, timeRange) : undefined),
-    [etfDataRaw, timeRange],
-  )
 
   const benchmarkQueries = useQueries({
     queries: BENCHMARKS.map((benchmark) => ({
@@ -268,7 +263,15 @@ function PriceChart() {
         })
       })
 
-      chart.timeScale().fitContent()
+      const visibleRange = getChartVisibleRange(
+        etfData.map((d: PricePoint) => ({ date: toDay(d.date) })),
+        timeRange,
+      )
+      if (visibleRange) {
+        chart.timeScale().setVisibleRange(visibleRange)
+      } else {
+        chart.timeScale().fitContent()
+      }
       chartRef.current = chart
 
       const applySize = () => {
@@ -306,25 +309,11 @@ function PriceChart() {
         </div>
       </div>
     )
-  if (!etfDataRaw || etfDataRaw.length === 0)
+  if (!etfData || etfData.length === 0)
     return (
       <div className="chart-panel h-full min-h-[280px]">
         <div className="flex flex-1 items-center justify-center py-10 font-mono text-sm text-[#475569]">
           No price data available
-        </div>
-      </div>
-    )
-  if (!etfData || etfData.length < 2)
-    return (
-      <div className="chart-panel h-full min-h-[280px]">
-        <div className="chart-header shrink-0">
-          <div className="flex flex-wrap items-center gap-3">
-            <h2 className="chart-title">Performance</h2>
-            <TimeRangeFilter value={timeRange} onChange={setTimeRange} />
-          </div>
-        </div>
-        <div className="flex flex-1 items-center justify-center py-10 font-mono text-sm text-[#475569]">
-          Not enough data for this range
         </div>
       </div>
     )

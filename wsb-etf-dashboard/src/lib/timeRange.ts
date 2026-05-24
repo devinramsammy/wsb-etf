@@ -19,21 +19,21 @@ function subtractDays(dateStr: string, days: number): string {
   return date.toISOString().slice(0, 10)
 }
 
-/** Keep points within the selected lookback from the latest observation. */
-export function filterSeriesByTimeRange<T extends { date: string }>(
-  data: T[],
+/** Visible chart window for a zoom preset; null means fit all data. */
+export function getChartVisibleRange(
+  data: { date: string }[],
   range: TimeRangeId,
-): T[] {
-  if (data.length === 0 || range === 'ALL') return data
+): { from: string; to: string } | null {
+  if (data.length === 0 || range === 'ALL') return null
 
   const sorted = [...data].sort((a, b) => toDay(a.date).localeCompare(toDay(b.date)))
   const config = TIME_RANGES.find((item) => item.id === range)
-  if (!config?.days) return sorted
+  if (!config?.days) return null
 
-  const endDate = toDay(sorted[sorted.length - 1]!.date)
-  const cutoff = subtractDays(endDate, config.days)
-  const filtered = sorted.filter((point) => toDay(point.date) >= cutoff)
+  const to = toDay(sorted[sorted.length - 1]!.date)
+  const first = toDay(sorted[0]!.date)
+  let from = subtractDays(to, config.days)
+  if (from < first) from = first
 
-  if (filtered.length >= 2) return filtered
-  return sorted.length >= 2 ? sorted : filtered
+  return { from, to }
 }
