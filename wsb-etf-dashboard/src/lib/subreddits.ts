@@ -1,7 +1,7 @@
 export const DEFAULT_SUBREDDIT = 'wallstreetbets'
 
 export const SUBREDDITS = [
-  { id: 'wallstreetbets', label: 'WSB', name: 'r/wallstreetbets' },
+  { id: 'wallstreetbets', label: 'WallStreetBets', name: 'r/wallstreetbets' },
   { id: 'investing', label: 'Investing', name: 'r/investing' },
   { id: 'smallstreetbets', label: 'SmallStreetBets', name: 'r/smallstreetbets' },
   { id: 'stocks', label: 'Stocks', name: 'r/stocks' },
