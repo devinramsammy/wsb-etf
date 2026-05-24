@@ -6,7 +6,7 @@ export const SUBREDDITS = [
   { id: "smallstreetbets", label: "SmallStreetBets", name: "r/smallstreetbets" },
   { id: "stocks", label: "Stocks", name: "r/stocks" },
   { id: "stockmarket", label: "Stock Market", name: "r/StockMarket" },
-  { id: "robinhood", label: "Robinhood", name: "r/robinhood" },
+  { id: "bogleheads", label: "Bogleheads", name: "r/Bogleheads" },
 ] as const;
 
 export type SubredditId = (typeof SUBREDDITS)[number]["id"];

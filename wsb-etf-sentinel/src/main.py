@@ -119,9 +119,9 @@ def run(params: RunParams | None = None) -> dict:
     changelog = calculator.diff_composition(result.entries, prior_composition)
 
     log.info("--- Step 6: Writing results to database ---")
-    db.insert_composition(result.entries, as_of, subreddit)
-    db.insert_etf_price(result.nav, as_of, subreddit)
-    db.insert_changelog(changelog, as_of, subreddit)
+    db.replace_composition(result.entries, as_of, subreddit)
+    db.upsert_etf_price(result.nav, as_of, subreddit)
+    db.replace_changelog(changelog, as_of, subreddit)
 
     log.info("Pipeline complete for r/%s on %s — NAV: $%.2f", subreddit, as_of, result.nav)
     return {

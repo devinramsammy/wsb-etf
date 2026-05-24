@@ -21,9 +21,12 @@ class RedditPost:
 
 
 def _post_from_raw(raw: dict, subreddit: str) -> RedditPost | None:
-    title = raw.get("title", "") or ""
+    title = (raw.get("title", "") or "").strip()
     body = (raw.get("selftext", "") or "").strip()
-    if not body or body == "[removed]" or body == "[deleted]":
+    if body in ("[removed]", "[deleted]"):
+        body = ""
+    # Link posts often have no selftext; title still carries tickers.
+    if not body and not title:
         return None
     score = int(raw.get("score") or 0)
     created = raw.get("created_utc")

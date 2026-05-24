@@ -4,7 +4,7 @@ cd "$(dirname "$0")"
 THROUGH="${1:-2026-05-21}"
 PUB=$(railway run --service wsb-etf-db printenv DATABASE_PUBLIC_URL)
 
-for sub in smallstreetbets stocks stockmarket robinhood; do
+for sub in smallstreetbets stocks stockmarket bogleheads; do
   LOG="/tmp/backfill-${sub}.log"
   echo "starting r/$sub -> $LOG"
   nohup railway run --service wsb-etf-sentinel-pipeline \

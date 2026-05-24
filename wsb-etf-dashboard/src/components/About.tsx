@@ -21,7 +21,7 @@ function About() {
       <p className="about-desc">
         A synthetic ETF derived from {source.name}. Posts from the subreddit are
         analyzed by{' '}
-        <span className="font-mono">gemini-3.1-flash-lite</span>{' '}
+        <span className="font-mono">gemini-3.1-flash</span>{' '}
         for sentiment per ticker.         Signals are merged with Reddit score-weighted
         sentiment votes, producing a NAV-style price. The pipeline fully rebalances weekly, liquidating the entire prior
         basket at as-of closes and repurchasing the new target weights with the
@@ -35,7 +35,7 @@ function About() {
         </div>
         <div className="about-detail-row">
           <span className="about-detail-label">Sentiment Model</span>
-          <span className="about-detail-value font-mono">gemini-3.1-flash-lite</span>
+          <span className="about-detail-value font-mono">gemini-3.1-flash</span>
         </div>
         <div className="about-detail-row">
           <span className="about-detail-label">Rebalance</span>

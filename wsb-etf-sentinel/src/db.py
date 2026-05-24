@@ -160,6 +160,39 @@ def ensure_initial_baseline(subreddit: str = DEFAULT_SUBREDDIT) -> None:
         upsert_etf_price(INITIAL_ETF_PRICE, INITIAL_COMPOSITION_DATE, subreddit)
 
 
+def replace_composition(
+    entries: list[CompositionEntry],
+    date: datetime.date,
+    subreddit: str = DEFAULT_SUBREDDIT,
+) -> None:
+    """Replace composition for a date (delete existing rows, then insert)."""
+    if not entries:
+        return
+
+    conn = _connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM etf_composition WHERE subreddit = %s AND date = %s",
+                (subreddit, date),
+            )
+            psycopg2.extras.execute_values(
+                cur,
+                """
+                INSERT INTO etf_composition (subreddit, ticker, percentage, shares, price, date)
+                VALUES %s
+                """,
+                [
+                    (subreddit, e.ticker, e.percentage, e.shares, e.price, date)
+                    for e in entries
+                ],
+            )
+        conn.commit()
+        log.info("Replaced %d composition entries for r/%s on %s", len(entries), subreddit, date)
+    finally:
+        conn.close()
+
+
 def insert_composition(
     entries: list[CompositionEntry],
     date: datetime.date,
@@ -204,6 +237,32 @@ def insert_etf_price(
             )
         conn.commit()
         log.info("Inserted ETF price $%.2f for r/%s on %s", price, subreddit, date)
+    finally:
+        conn.close()
+
+
+def replace_changelog(
+    entries: list[ChangelogEntry],
+    date: datetime.date,
+    subreddit: str = DEFAULT_SUBREDDIT,
+) -> None:
+    """Replace changelog for a date (delete existing rows, then insert)."""
+    conn = _connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM etf_changelog WHERE subreddit = %s AND date = %s",
+                (subreddit, date),
+            )
+            if entries:
+                psycopg2.extras.execute_values(
+                    cur,
+                    "INSERT INTO etf_changelog (subreddit, action, ticker, weight, date) VALUES %s",
+                    [(subreddit, e.action, e.ticker, e.weight, date) for e in entries],
+                )
+        conn.commit()
+        if entries:
+            log.info("Replaced %d changelog entries for r/%s on %s", len(entries), subreddit, date)
     finally:
         conn.close()
 
@@ -401,14 +460,18 @@ def get_distinct_nav_dates(
 
 
 def composition_exists(subreddit: str, date: datetime.date) -> bool:
-    """True if a composition row exists for this subreddit and date."""
+    """True if a full rebalance exists (composition + changelog) for this date."""
     conn = _connect()
     try:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT 1 FROM etf_composition
-                WHERE subreddit = %s AND date = %s
+                SELECT 1 FROM etf_composition c
+                WHERE c.subreddit = %s AND c.date = %s
+                  AND EXISTS (
+                    SELECT 1 FROM etf_changelog l
+                    WHERE l.subreddit = c.subreddit AND l.date = c.date
+                  )
                 LIMIT 1
                 """,
                 (subreddit, date),
