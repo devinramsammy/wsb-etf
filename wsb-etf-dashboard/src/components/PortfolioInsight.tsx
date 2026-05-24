@@ -600,10 +600,7 @@ function PortfolioInsight() {
         <h2 className="term-panel-title">Portfolio Insight</h2>
       </div>
 
-      <div className="border-b border-white/[0.06] px-6 pb-5 pt-1">
-        <h3 className="mb-3 font-mono text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-[#525252]">
-          Key performance
-        </h3>
+      <div className="border-b border-white/[0.06] px-6 py-5">
         <KpiStrip />
       </div>
 
