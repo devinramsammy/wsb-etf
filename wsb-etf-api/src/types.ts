@@ -60,6 +60,7 @@ export interface ChangelogMeta {
 export interface BenchmarkQuery {
   from?: string;
   to?: string;
+  ticker?: string;
 }
 
 // --- Express error with status ---

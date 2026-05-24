@@ -366,6 +366,151 @@
     padding-left: 14px;
   }
 
+  /* ── Reference instrument rail ───────────────────────────────── */
+
+  .reference-rail {
+    font-family: var(--font-mono);
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 0.625rem;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .reference-rail::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      rgba(255, 255, 255, 0.015) 0px,
+      rgba(255, 255, 255, 0.015) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+    pointer-events: none;
+    opacity: 0.35;
+  }
+
+  .reference-rail-vertical {
+    width: 13.5rem;
+    min-height: 100%;
+  }
+
+  .reference-rail-horizontal {
+    width: 100%;
+  }
+
+  .reference-rail-list {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .reference-rail-list-horizontal {
+    flex-direction: row;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .reference-rail-list-horizontal::-webkit-scrollbar {
+    display: none;
+  }
+
+  .reference-rail-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    width: 100%;
+    padding: 0.625rem 0.75rem;
+    border: none;
+    border-left: 3px solid transparent;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+    transition:
+      background-color 0.15s ease,
+      border-color 0.15s ease;
+  }
+
+  .reference-rail-list-horizontal .reference-rail-row {
+    min-width: 9.5rem;
+    border-left: none;
+    border-bottom: 3px solid transparent;
+  }
+
+  .reference-rail-row:hover {
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .reference-rail-row-selected {
+    border-left-color: #4ade80;
+    background: rgba(74, 222, 128, 0.06);
+  }
+
+  .reference-rail-list-horizontal .reference-rail-row-selected {
+    border-left-color: transparent;
+    border-bottom-color: #4ade80;
+  }
+
+  .reference-rail-row-main {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+
+  .reference-rail-ticker {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: #737373;
+  }
+
+  .reference-rail-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #4ade80;
+    box-shadow: 0 0 8px rgba(74, 222, 128, 0.65);
+    flex-shrink: 0;
+  }
+
+  .reference-rail-name {
+    font-size: 0.62rem;
+    color: #475569;
+    white-space: nowrap;
+  }
+
+  .reference-rail-row-meta {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+
+  .reference-rail-return {
+    font-size: 0.62rem;
+    color: #64748b;
+  }
+
+  .reference-rail-alpha {
+    font-size: 0.68rem;
+    font-weight: 700;
+    margin-left: auto;
+  }
+
+  .reference-rail-vertical-wrap {
+    align-self: stretch;
+  }
+
+  .reference-rail-horizontal-wrap {
+    min-width: 0;
+  }
+
   /* ── KPI cards ───────────────────────────────────────────────── */
 
   .kpi-card {

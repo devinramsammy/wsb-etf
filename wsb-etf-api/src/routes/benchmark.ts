@@ -1,4 +1,8 @@
 import { Router, Request, Response, NextFunction } from "express";
+import {
+  DEFAULT_BENCHMARK_TICKER,
+  isBenchmarkTicker,
+} from "../benchmarks.js";
 import { BenchmarkQuery } from "../types.js";
 
 const router = Router();
@@ -11,20 +15,24 @@ function isValidDate(str: string): boolean {
   return !Number.isNaN(d.getTime());
 }
 
-// Simple in-memory cache (1 hour TTL)
-let cache: { data: { date: string; price: number }[]; ts: number } | null =
-  null;
+const cache = new Map<
+  string,
+  { data: { date: string; price: number }[]; ts: number }
+>();
 const CACHE_TTL = 60 * 60 * 1000;
 
-async function fetchVooData(): Promise<{ date: string; price: number }[]> {
-  if (cache && Date.now() - cache.ts < CACHE_TTL) return cache.data;
+async function fetchBenchmarkData(
+  ticker: string,
+): Promise<{ date: string; price: number }[]> {
+  const cached = cache.get(ticker);
+  if (cached && Date.now() - cached.ts < CACHE_TTL) return cached.data;
 
-  // VOO benchmark series starts at product inception (Dec 29, 2025)
+  // Benchmark series starts at product inception (Dec 29, 2025)
   const period1 = Math.floor(
     new Date("2025-12-29T00:00:00Z").getTime() / 1000,
   );
   const period2 = Math.floor(Date.now() / 1000);
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/VOO?period1=${period1}&period2=${period2}&interval=1d`;
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?period1=${period1}&period2=${period2}&interval=1d`;
 
   const res = await fetch(url, {
     headers: {
@@ -33,17 +41,18 @@ async function fetchVooData(): Promise<{ date: string; price: number }[]> {
   });
 
   if (!res.ok) {
-    throw new Error(`Yahoo Finance returned ${res.status}`);
+    throw new Error(`Yahoo Finance returned ${res.status} for ${ticker}`);
   }
 
   const json = await res.json();
   const result = json.chart?.result?.[0];
-  if (!result) throw new Error("No chart data from Yahoo Finance");
+  if (!result) throw new Error(`No chart data from Yahoo Finance for ${ticker}`);
 
   const timestamps: number[] = result.timestamp || [];
   const closes: (number | null)[] =
     result.indicators?.adjclose?.[0]?.adjclose ||
-    result.indicators?.quote?.[0]?.close || [];
+    result.indicators?.quote?.[0]?.close ||
+    [];
 
   const points: { date: string; price: number }[] = [];
   for (let i = 0; i < timestamps.length; i++) {
@@ -54,7 +63,7 @@ async function fetchVooData(): Promise<{ date: string; price: number }[]> {
     points.push({ date: dateStr, price: Math.round(close * 100) / 100 });
   }
 
-  cache = { data: points, ts: Date.now() };
+  cache.set(ticker, { data: points, ts: Date.now() });
   return points;
 }
 
@@ -66,7 +75,14 @@ router.get(
     next: NextFunction,
   ) => {
     try {
-      const { from, to } = req.query;
+      const { from, to, ticker: rawTicker } = req.query;
+      const ticker = (rawTicker ?? DEFAULT_BENCHMARK_TICKER).toUpperCase();
+
+      if (!isBenchmarkTicker(ticker)) {
+        return res.status(400).json({
+          error: `Invalid ticker. Allowed: ${["VOO", "VTI", "QQQ", "IWM", "VT"].join(", ")}`,
+        });
+      }
 
       if (from !== undefined && !isValidDate(from)) {
         return res
@@ -79,12 +95,12 @@ router.get(
           .json({ error: "Invalid 'to' date format. Use YYYY-MM-DD." });
       }
 
-      let data = await fetchVooData();
+      let data = await fetchBenchmarkData(ticker);
 
       if (from) data = data.filter((d) => d.date >= from);
       if (to) data = data.filter((d) => d.date <= to);
 
-      res.json({ data });
+      res.json({ data, ticker });
     } catch (err) {
       next(err);
     }

@@ -103,9 +103,10 @@ export function fetchChangelog(
   );
 }
 
-/** VOO benchmark price history */
-export function fetchBenchmark(): Promise<BenchmarkPoint[]> {
-  return request<ApiResponse<BenchmarkPoint>>('/api/benchmark').then(
+/** Benchmark price history (default VOO). */
+export function fetchBenchmark(ticker = 'VOO'): Promise<BenchmarkPoint[]> {
+  const params = new URLSearchParams({ ticker })
+  return request<ApiResponse<BenchmarkPoint>>(`/api/benchmark?${params}`).then(
     (r) => r.data,
   );
 }

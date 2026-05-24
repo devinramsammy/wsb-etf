@@ -1,11 +1,14 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { createChart, LineSeries } from 'lightweight-charts'
 import type { IChartApi, ISeriesApi, SeriesType, Time } from 'lightweight-charts'
-import { useQuery } from '@tanstack/react-query'
+import { useQueries, useQuery } from '@tanstack/react-query'
 import { fetchPriceHistory, fetchBenchmark } from '../api/client'
-import type { PricePoint, BenchmarkPoint } from '../api/client'
+import type { PricePoint } from '../api/client'
 import { useSubreddit } from '../context/SubredditContext'
 import { getEtfLabel } from '@/lib/subreddits'
+import { BENCHMARKS, DEFAULT_BENCHMARK, type BenchmarkId } from '@/lib/benchmarks'
+import { computeAlignedReturn, normalizeBenchmarkToReturn } from '@/lib/benchmarkReturns'
+import ReferenceRail from './ReferenceRail'
 
 /* ── helpers ─────────────────────────────────────────────────── */
 
@@ -45,7 +48,8 @@ interface TooltipData {
   y: number
   date: string
   etfReturn: number | null
-  vooReturn: number | null
+  benchmarkReturn: number | null
+  benchmarkLabel: string
 }
 
 /* ── component ───────────────────────────────────────────────── */
@@ -53,10 +57,11 @@ interface TooltipData {
 function PriceChart() {
   const { subreddit } = useSubreddit()
   const etfLabel = getEtfLabel(subreddit)
+  const [selectedBenchmark, setSelectedBenchmark] = useState<BenchmarkId>(DEFAULT_BENCHMARK)
   const chartRef = useRef<IChartApi | null>(null)
   const observerRef = useRef<ResizeObserver | null>(null)
   const etfSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
-  const vooSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
+  const benchmarkSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const [tooltip, setTooltip] = useState<TooltipData | null>(null)
 
   const { data: etfData, isLoading: etfLoading, error: etfError } = useQuery({
@@ -64,12 +69,54 @@ function PriceChart() {
     queryFn: () => fetchPriceHistory(subreddit),
   })
 
-  const { data: vooData, isLoading: vooLoading } = useQuery({
-    queryKey: ['benchmark'],
-    queryFn: () => fetchBenchmark(),
+  const benchmarkQueries = useQueries({
+    queries: BENCHMARKS.map((benchmark) => ({
+      queryKey: ['benchmark', benchmark.id],
+      queryFn: () => fetchBenchmark(benchmark.id),
+      staleTime: 60 * 60 * 1000,
+    })),
   })
 
-  const isLoading = etfLoading || vooLoading
+  const benchmarkDataById = useMemo(() => {
+    const map = new Map<BenchmarkId, typeof benchmarkQueries[number]['data']>()
+    BENCHMARKS.forEach((benchmark, index) => {
+      map.set(benchmark.id, benchmarkQueries[index]?.data)
+    })
+    return map
+  }, [benchmarkQueries])
+
+  const selectedBenchmarkData = benchmarkDataById.get(selectedBenchmark)
+  const benchmarksLoading = benchmarkQueries.some((query) => query.isLoading)
+  const isLoading = etfLoading || benchmarksLoading
+
+  const firstDate = etfData && etfData.length > 0 ? toDay(etfData[0]!.date) : ''
+  const lastDate = etfData && etfData.length > 0 ? toDay(etfData[etfData.length - 1]!.date) : ''
+
+  const etfReturn = useMemo(() => {
+    if (!etfData || etfData.length === 0) return null
+    const normalized = normalizeToReturn(
+      etfData.map((d: PricePoint) => ({ date: toDay(d.date), price: Number(d.price) })),
+    )
+    return normalized.length > 0 ? normalized[normalized.length - 1]!.value : null
+  }, [etfData])
+
+  const referenceRows = useMemo(() => {
+    if (!firstDate || etfReturn == null) return []
+
+    return BENCHMARKS.map((benchmark) => {
+      const benchmarkReturn = computeAlignedReturn(
+        benchmarkDataById.get(benchmark.id),
+        firstDate,
+      )
+      return {
+        id: benchmark.id,
+        benchmarkReturn,
+        alpha: benchmarkReturn != null ? etfReturn - benchmarkReturn : null,
+      }
+    })
+  }, [benchmarkDataById, etfReturn, firstDate])
+
+  const selectedAlpha = referenceRows.find((row) => row.id === selectedBenchmark)?.alpha ?? null
 
   const chartCallbackRef = useCallback(
     (container: HTMLDivElement | null) => {
@@ -82,7 +129,7 @@ function PriceChart() {
         chartRef.current = null
       }
       etfSeriesRef.current = null
-      vooSeriesRef.current = null
+      benchmarkSeriesRef.current = null
 
       if (!container || !etfData || etfData.length === 0) return
 
@@ -127,7 +174,6 @@ function PriceChart() {
         },
       })
 
-      // WSB ETF line — green accent
       const etfSeries = chart.addSeries(LineSeries, {
         color: '#4ade80',
         lineWidth: 2,
@@ -149,10 +195,10 @@ function PriceChart() {
       etfSeries.setData(etfNormalized)
       etfSeriesRef.current = etfSeries as unknown as ISeriesApi<'Line'>
 
-      // VOO benchmark — muted
-      if (vooData && vooData.length > 0) {
-        const vooSeries = chart.addSeries(LineSeries, {
-          color: '#525252',
+      const anchorDate = toDay(etfData[0]!.date)
+      if (selectedBenchmarkData && selectedBenchmarkData.length > 0) {
+        const benchmarkSeries = chart.addSeries(LineSeries, {
+          color: '#a3a3a3',
           lineWidth: 1,
           lineStyle: 0,
           priceFormat: {
@@ -162,47 +208,19 @@ function PriceChart() {
           lastValueVisible: false,
           priceLineVisible: false,
           crosshairMarkerRadius: 4,
-          crosshairMarkerBackgroundColor: '#525252',
+          crosshairMarkerBackgroundColor: '#a3a3a3',
           crosshairMarkerBorderColor: '#111111',
           crosshairMarkerBorderWidth: 2,
         })
 
-        const firstEtfDate = toDay(etfData[0]!.date)
-        const vooSorted = [...vooData].sort(
-          (a: BenchmarkPoint, b: BenchmarkPoint) => a.date.localeCompare(b.date),
+        const benchmarkNormalized = normalizeBenchmarkToReturn(
+          selectedBenchmarkData,
+          anchorDate,
         )
-
-        let vooBase: BenchmarkPoint | null = null
-        for (const p of vooSorted) {
-          if (p.date <= firstEtfDate) vooBase = p
-          if (p.date >= firstEtfDate) break
-        }
-        if (!vooBase && vooSorted.length > 0) vooBase = vooSorted[0]!
-
-        if (vooBase) {
-          const basePrice = vooBase.price
-          const vooFiltered = vooSorted.filter(
-            (d: BenchmarkPoint) => d.date >= firstEtfDate,
-          )
-          const vooNormalized = vooFiltered.map((d: BenchmarkPoint) => ({
-            time: toDay(d.date),
-            value: ((d.price - basePrice) / basePrice) * 100,
-          }))
-
-          const dateMap = new Map<string, { time: string; value: number }>()
-          for (const point of vooNormalized) {
-            dateMap.set(point.time, point)
-          }
-          const deduped = Array.from(dateMap.values()).sort((a, b) =>
-            a.time.localeCompare(b.time),
-          )
-
-          vooSeries.setData(deduped)
-          vooSeriesRef.current = vooSeries as unknown as ISeriesApi<'Line'>
-        }
+        benchmarkSeries.setData(benchmarkNormalized)
+        benchmarkSeriesRef.current = benchmarkSeries as unknown as ISeriesApi<'Line'>
       }
 
-      // Crosshair tooltip
       chart.subscribeCrosshairMove((param) => {
         if (
           !param.time ||
@@ -215,9 +233,8 @@ function PriceChart() {
         }
 
         const dateStr = param.time as string
-
-        let etfReturn: number | null = null
-        let vooReturn: number | null = null
+        let etfReturnAtPoint: number | null = null
+        let benchmarkReturnAtPoint: number | null = null
 
         const seriesData = param.seriesData as Map<
           ISeriesApi<SeriesType, Time>,
@@ -226,9 +243,9 @@ function PriceChart() {
         for (const [series, data] of seriesData) {
           if (data.value !== undefined) {
             if (series === etfSeriesRef.current) {
-              etfReturn = data.value
-            } else if (series === vooSeriesRef.current) {
-              vooReturn = data.value
+              etfReturnAtPoint = data.value
+            } else if (series === benchmarkSeriesRef.current) {
+              benchmarkReturnAtPoint = data.value
             }
           }
         }
@@ -237,8 +254,9 @@ function PriceChart() {
           x: param.point.x,
           y: param.point.y,
           date: dateStr,
-          etfReturn,
-          vooReturn,
+          etfReturn: etfReturnAtPoint,
+          benchmarkReturn: benchmarkReturnAtPoint,
+          benchmarkLabel: selectedBenchmark,
         })
       })
 
@@ -259,7 +277,7 @@ function PriceChart() {
       resizeObserver.observe(container)
       observerRef.current = resizeObserver
     },
-    [etfData, vooData],
+    [etfData, selectedBenchmark, selectedBenchmarkData],
   )
 
   if (isLoading)
@@ -289,17 +307,8 @@ function PriceChart() {
       </div>
     )
 
-  // Compute latest returns for the header
-  const etfNorm = normalizeToReturn(
-    etfData.map((d: PricePoint) => ({ date: toDay(d.date), price: Number(d.price) })),
-  )
-  const latestEtf = etfNorm.length > 0 ? etfNorm[etfNorm.length - 1]!.value : null
-  const firstDate = etfData.length > 0 ? toDay(etfData[0]!.date) : ''
-  const lastDate = etfData.length > 0 ? toDay(etfData[etfData.length - 1]!.date) : ''
-
   return (
     <div className="chart-panel h-full min-h-[280px]">
-      {/* Header */}
       <div className="chart-header shrink-0">
         <div className="flex items-baseline gap-3">
           <h2 className="chart-title">Performance</h2>
@@ -310,84 +319,109 @@ function PriceChart() {
           )}
         </div>
 
-        <div className="flex items-center gap-6">
+        <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
             <span className="inline-block h-[3px] w-5 rounded-sm bg-[#4ade80]" />
             <span className="font-mono text-[0.7rem] font-semibold tracking-wide text-[#a3a3a3]">
               {etfLabel}
             </span>
-            {latestEtf != null && (
+            {etfReturn != null && (
               <span
-                className={`font-mono text-[0.7rem] font-bold tabular-nums ${latestEtf >= 0 ? 'text-[#4ade80]' : 'text-[#f87171]'}`}
+                className={`font-mono text-[0.7rem] font-bold tabular-nums ${etfReturn >= 0 ? 'text-[#4ade80]' : 'text-[#f87171]'}`}
               >
-                {formatPctSigned(latestEtf)}
+                {formatPctSigned(etfReturn)}
               </span>
             )}
           </div>
           <div className="flex items-center gap-2">
-            <span className="inline-block h-[3px] w-5 rounded-sm bg-[#525252]" />
-            <span className="font-mono text-[0.7rem] font-semibold tracking-wide text-[#525252]">
-              VOO
+            <span className="inline-block h-[3px] w-5 rounded-sm bg-[#a3a3a3]" />
+            <span className="font-mono text-[0.7rem] font-semibold tracking-wide text-[#737373]">
+              {selectedBenchmark}
             </span>
+            {selectedAlpha != null && (
+              <span
+                className={`font-mono text-[0.7rem] font-bold tabular-nums ${selectedAlpha >= 0 ? 'text-[#4ade80]' : 'text-[#f87171]'}`}
+              >
+                {formatPctSigned(selectedAlpha)} α
+              </span>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Chart area — flex-1 so the panel matches About height on wide layouts */}
-      <div className="relative flex min-h-0 flex-1 flex-col px-5 pb-5">
-        <div
-          className="chart-canvas-wrap"
-          ref={chartCallbackRef}
-          onMouseLeave={() => setTooltip(null)}
+      <div className="reference-rail-horizontal-wrap px-5 pb-3 lg:hidden">
+        <ReferenceRail
+          rows={referenceRows}
+          selected={selectedBenchmark}
+          onSelect={setSelectedBenchmark}
+          layout="horizontal"
         />
+      </div>
 
-        {/* Tooltip */}
-        {tooltip && (
+      <div className="relative flex min-h-0 flex-1">
+        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col px-5 pb-5">
           <div
-            className="chart-tooltip"
-            style={{
-              left: Math.min(tooltip.x + 16, (chartRef.current as unknown as { _private__width?: number })?._private__width ? 300 : 9999),
-              top: tooltip.y - 10,
-              transform: tooltip.x > 500 ? 'translate(-110%, -10%)' : 'translate(0, -10%)',
-            }}
-          >
-            <div className="chart-tooltip-date">{formatDateLabel(tooltip.date)}</div>
-            <div className="chart-tooltip-rows">
-              {tooltip.etfReturn != null && (
-                <div className="chart-tooltip-row">
-                  <span className="chart-tooltip-dot" style={{ background: '#4ade80' }} />
-                  <span className="chart-tooltip-label">{etfLabel}</span>
-                  <span
-                    className={`chart-tooltip-value ${tooltip.etfReturn >= 0 ? 'text-[#4ade80]' : 'text-[#f87171]'}`}
-                  >
-                    {formatPctSigned(tooltip.etfReturn)}
-                  </span>
-                </div>
-              )}
-              {tooltip.vooReturn != null && (
-                <div className="chart-tooltip-row">
-                  <span className="chart-tooltip-dot" style={{ background: '#525252' }} />
-                  <span className="chart-tooltip-label">VOO</span>
-                  <span
-                    className={`chart-tooltip-value ${tooltip.vooReturn >= 0 ? 'text-[#4ade80]' : 'text-[#f87171]'}`}
-                  >
-                    {formatPctSigned(tooltip.vooReturn)}
-                  </span>
-                </div>
-              )}
-              {tooltip.etfReturn != null && tooltip.vooReturn != null && (
-                <div className="chart-tooltip-row chart-tooltip-spread">
-                  <span className="chart-tooltip-label">Spread</span>
-                  <span
-                    className={`chart-tooltip-value font-bold ${(tooltip.etfReturn - tooltip.vooReturn) >= 0 ? 'text-[#4ade80]' : 'text-[#f87171]'}`}
-                  >
-                    {formatPctSigned(tooltip.etfReturn - tooltip.vooReturn)}
-                  </span>
-                </div>
-              )}
+            className="chart-canvas-wrap"
+            ref={chartCallbackRef}
+            onMouseLeave={() => setTooltip(null)}
+          />
+
+          {tooltip && (
+            <div
+              className="chart-tooltip"
+              style={{
+                left: Math.min(tooltip.x + 16, (chartRef.current as unknown as { _private__width?: number })?._private__width ? 300 : 9999),
+                top: tooltip.y - 10,
+                transform: tooltip.x > 500 ? 'translate(-110%, -10%)' : 'translate(0, -10%)',
+              }}
+            >
+              <div className="chart-tooltip-date">{formatDateLabel(tooltip.date)}</div>
+              <div className="chart-tooltip-rows">
+                {tooltip.etfReturn != null && (
+                  <div className="chart-tooltip-row">
+                    <span className="chart-tooltip-dot" style={{ background: '#4ade80' }} />
+                    <span className="chart-tooltip-label">{etfLabel}</span>
+                    <span
+                      className={`chart-tooltip-value ${tooltip.etfReturn >= 0 ? 'text-[#4ade80]' : 'text-[#f87171]'}`}
+                    >
+                      {formatPctSigned(tooltip.etfReturn)}
+                    </span>
+                  </div>
+                )}
+                {tooltip.benchmarkReturn != null && (
+                  <div className="chart-tooltip-row">
+                    <span className="chart-tooltip-dot" style={{ background: '#a3a3a3' }} />
+                    <span className="chart-tooltip-label">{tooltip.benchmarkLabel}</span>
+                    <span
+                      className={`chart-tooltip-value ${tooltip.benchmarkReturn >= 0 ? 'text-[#4ade80]' : 'text-[#f87171]'}`}
+                    >
+                      {formatPctSigned(tooltip.benchmarkReturn)}
+                    </span>
+                  </div>
+                )}
+                {tooltip.etfReturn != null && tooltip.benchmarkReturn != null && (
+                  <div className="chart-tooltip-row chart-tooltip-spread">
+                    <span className="chart-tooltip-label">Alpha</span>
+                    <span
+                      className={`chart-tooltip-value font-bold ${(tooltip.etfReturn - tooltip.benchmarkReturn) >= 0 ? 'text-[#4ade80]' : 'text-[#f87171]'}`}
+                    >
+                      {formatPctSigned(tooltip.etfReturn - tooltip.benchmarkReturn)}
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
+
+        <div className="reference-rail-vertical-wrap hidden shrink-0 pb-5 pr-5 lg:block">
+          <ReferenceRail
+            rows={referenceRows}
+            selected={selectedBenchmark}
+            onSelect={setSelectedBenchmark}
+            layout="vertical"
+          />
+        </div>
       </div>
     </div>
   )
